@@ -27,5 +27,5 @@ prometheus-client
 python-dotenv
 
 # CVE patches (transitive overrides)
-starlette>=0.40.0
+starlette>=1.0.1
 pyasn1>=0.6.0
