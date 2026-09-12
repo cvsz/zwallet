@@ -21,14 +21,17 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: backend/package-lock.json
-      - run: npm ci
-      - run: npm run lint --if-present
-      - run: npm test --if-present
+          cache: pnpm
+          cache-dependency-path: backend/pnpm-workspace.yaml
+      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm -r --if-present run lint
+      - run: pnpm -r --if-present run test
 
   build-and-push:
     runs-on: ubuntu-latest
