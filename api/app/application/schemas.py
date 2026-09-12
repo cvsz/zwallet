@@ -1,4 +1,22 @@
+import re
+
 from pydantic import BaseModel, EmailStr, Field, field_validator
+
+SUPPORTED_ZTRADER_CHAINS = {
+    "ethereum",
+    "base",
+    "bsc",
+    "arbitrum",
+    "optimism",
+    "polygon",
+    "solana",
+    "bitcoin",
+}
+_EVM_ADDRESS = re.compile(r"^0x[a-fA-F0-9]{40}$")
+_SOLANA_ADDRESS = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+_BITCOIN_ADDRESS = re.compile(
+    r"^(?:bc1[ac-hj-np-z02-9]{11,71}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$"
+)
 
 
 class RegisterRequest(BaseModel):
@@ -114,6 +132,31 @@ class ZTraderOnchainEvidenceRequestDTO(BaseModel):
     trace_id: str = Field(min_length=1, max_length=128)
     chain: str = Field(min_length=1, max_length=64)
     address: str = Field(min_length=1, max_length=256)
+
+    @field_validator("chain")
+    @classmethod
+    def supported_chain(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in SUPPORTED_ZTRADER_CHAINS:
+            raise ValueError("unsupported chain")
+        return normalized
+
+    @field_validator("address")
+    @classmethod
+    def valid_chain_address(cls, value: str, info) -> str:
+        normalized = value.strip()
+        chain = info.data.get("chain")
+        if chain in {"ethereum", "base", "bsc", "arbitrum", "optimism", "polygon"}:
+            valid = bool(_EVM_ADDRESS.fullmatch(normalized))
+        elif chain == "solana":
+            valid = bool(_SOLANA_ADDRESS.fullmatch(normalized))
+        elif chain == "bitcoin":
+            valid = bool(_BITCOIN_ADDRESS.fullmatch(normalized.lower()))
+        else:
+            valid = False
+        if not valid:
+            raise ValueError("malformed address for chain")
+        return normalized
 
 
 class ZTraderOnchainEvidenceResponseDTO(BaseModel):
