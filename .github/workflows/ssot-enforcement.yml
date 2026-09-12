@@ -12,12 +12,12 @@ jobs:
 
       - name: Check forbidden patterns
         run: |
-          if grep -R "process.env" .; then
+          if git grep -n "process.env" -- . ':(exclude).github/workflows/ssot-enforcement.yml'; then
             echo "❌ Env secrets not allowed"
             exit 1
           fi
 
-          if grep -R "x-client-cert" .; then
+          if git grep -n "x-client-cert" -- . ':(exclude).github/workflows/ssot-enforcement.yml'; then
             echo "❌ Header trust violation"
             exit 1
           fi
