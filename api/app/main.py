@@ -23,6 +23,11 @@ from app.application.schemas import (
 from app.middleware.security_unified import UnifiedSecurityMiddleware, enforce_runtime_prerequisites
 from app.middleware.idempotency_global import GlobalIdempotencyMiddleware
 from app.application.services import AuthService, WalletService
+from app.application.ztrader_evidence import (
+    ZTraderEvidenceRequest,
+    ZTraderEvidenceResponse,
+    build_collector_status_evidence,
+)
 from app.application.swap import SwapOrchestrator, SwapExecutionError
 from app.infrastructure.blockchain import EthereumClient
 from app.infrastructure.db import engine, Base
@@ -150,3 +155,15 @@ async def execute(payload: ExecuteRequestDTO, _: str = Depends(require_user)) ->
         return orchestrator.execute_with_fallback(candidates, min_out=payload.min_out, max_retries=payload.max_retries)
     except SwapExecutionError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post(
+    "/v1/integrations/ztrader/evidence",
+    response_model=ZTraderEvidenceResponse,
+)
+async def ztrader_readonly_evidence(
+    payload: ZTraderEvidenceRequest,
+    _: str = Depends(require_user),
+) -> ZTraderEvidenceResponse:
+    """Return read-only evidence only; this endpoint never requests signing or execution."""
+    return build_collector_status_evidence(payload)
