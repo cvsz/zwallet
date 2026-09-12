@@ -89,3 +89,40 @@ class ExecuteRequestDTO(BaseModel):
     amount: float = Field(gt=0)
     min_out: float = Field(gt=0)
     max_retries: int = Field(ge=0, le=3, default=1)
+
+
+class ZTraderEvidenceSourceDTO(BaseModel):
+    provider: str = Field(min_length=1, max_length=128)
+    reference: str | None = Field(default=None, max_length=1024)
+    observed_at: str = Field(min_length=1, max_length=64)
+
+
+class ZTraderOnchainEvidenceDataDTO(BaseModel):
+    holder_count: int | None = Field(default=None, ge=0)
+    top10_holder_pct: float | None = Field(default=None, ge=0, le=100)
+    net_flow_usd_24h: float | None = None
+    smart_money_net_flow_usd_24h: float | None = None
+    liquidity_usd: float | None = Field(default=None, ge=0)
+    liquidity_change_pct_24h: float | None = None
+    estimated_exit_price_impact_pct: float | None = Field(default=None, ge=0)
+    deployer_flags: list[str] = Field(default_factory=list)
+    wallet_cluster_flags: list[str] = Field(default_factory=list)
+
+
+class ZTraderOnchainEvidenceRequestDTO(BaseModel):
+    version: str = Field(default="1.0", pattern=r"^1\.0$")
+    trace_id: str = Field(min_length=1, max_length=128)
+    chain: str = Field(min_length=1, max_length=64)
+    address: str = Field(min_length=1, max_length=256)
+
+
+class ZTraderOnchainEvidenceResponseDTO(BaseModel):
+    version: str = Field(default="1.0", pattern=r"^1\.0$")
+    trace_id: str
+    chain: str
+    address: str
+    observed_at: str
+    freshness_seconds: int = Field(ge=0)
+    quality: str = Field(pattern=r"^(VERIFIED|INFERRED|PARTIAL|UNAVAILABLE)$")
+    sources: list[ZTraderEvidenceSourceDTO] = Field(min_length=1)
+    evidence: ZTraderOnchainEvidenceDataDTO
