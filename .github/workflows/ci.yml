@@ -19,6 +19,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile=false
+      - name: Build workspace packages required by type declarations
+        run: pnpm --filter @zwallet/rpc build
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm check:circular
