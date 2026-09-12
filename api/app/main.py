@@ -161,6 +161,7 @@ async def execute(payload: ExecuteRequestDTO, _: str = Depends(require_user)) ->
     "/v1/integrations/ztrader/onchain-evidence",
     response_model=ZTraderOnchainEvidenceResponseDTO,
 )
+@limiter.limit("30/minute")
 async def ztrader_onchain_evidence(
     payload: ZTraderOnchainEvidenceRequestDTO,
     _: str = Depends(require_user),
