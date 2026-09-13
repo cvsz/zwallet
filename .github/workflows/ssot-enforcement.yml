@@ -3,6 +3,9 @@ name: SSOT Enforcement
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   ssot:
     runs-on: ubuntu-latest
@@ -10,14 +13,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check forbidden patterns
+      - name: Reject tracked secret material
+        shell: bash
         run: |
-          if grep -R "process.env" .; then
-            echo "❌ Env secrets not allowed"
+          set -euo pipefail
+          if git ls-files | grep -E '(^|/)(\.env($|\.)|id_rsa$|id_ed25519$|.*\.pem$|.*\.key$|credentials\.json$|service-account\.json$)'; then
+            echo "Tracked secret material is not allowed"
             exit 1
           fi
 
-          if grep -R "x-client-cert" .; then
-            echo "❌ Header trust violation"
+      - name: Reject direct client-certificate header trust
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -n -i -E '["'"'"']x-client-cert["'"'"']' -- ':!docs/**' ':!scripts/archive/**'; then
+            echo "Direct x-client-cert header trust is forbidden; terminate and verify mTLS at the trusted ingress boundary"
             exit 1
           fi
