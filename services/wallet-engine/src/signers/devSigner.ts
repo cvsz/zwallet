@@ -1,12 +1,24 @@
 import { createHash } from "node:crypto";
-import type { SignedTransfer, SignTransferInput, TransferSigner } from "./types.js";
+import type { SigningRequest, SigningResult, TransferSigner } from "./types.js";
 
 export class DevSigner implements TransferSigner {
-  async signTransfer(input: SignTransferInput): Promise<SignedTransfer> {
+  provider = "dev" as const;
+
+  async signTransfer(input: SigningRequest): Promise<SigningResult> {
+    const rawTransaction = createHash("sha256")
+      .update(JSON.stringify({
+        transferId: input.transfer.id,
+        keyRef: input.key.keyRef,
+        nonce: input.nonce,
+        amountAtomic: input.transfer.amountAtomic,
+      }))
+      .digest("hex");
+
     return {
-      rawTransaction: createHash("sha256")
-        .update(JSON.stringify(input))
-        .digest("hex"),
+      signature: createHash("sha256").update(`signature:${rawTransaction}`).digest("hex"),
+      rawTransaction,
+      provider: "dev",
+      simulated: true,
     };
   }
 }
