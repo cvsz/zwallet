@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  assertTransferRequest,
-  type SupportedChain,
-  type TransferRequest,
-  type WalletEventType
-} from '@zwallet/shared-types/wallet';
+import { assertTransferRequest } from '@zwallet/shared-types/wallet';
+import type {
+  SupportedChain,
+  TransferRequest,
+  WalletEventType
+} from '@zwallet/shared-types/contracts';
 
 export type WalletTransferStatus =
   | 'previewed'
