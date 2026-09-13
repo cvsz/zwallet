@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "lint": "eslint \"src/**/*.ts\"",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc --build tsconfig.json --force",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "main": "./dist/index.js",

@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@10.0.0",
   "scripts": {
-    "typecheck": "pnpm -r --if-present run typecheck",
+    "typecheck": "pnpm --filter @zwallet/shared-types run build && pnpm --filter @zwallet/rpc run build && pnpm --filter @zwallet/wallet-engine run build && pnpm -r --if-present run typecheck",
     "lint": "pnpm -r --if-present run lint",
     "check:circular": "madge --circular --extensions ts apps/api/src services/wallet-engine/src services/swap-engine/src services/indexer/src packages/crypto-core/src packages/chain-adapters/src packages/shared-types/src",
     "setup:auto": "node scripts/run-installer.mjs",
