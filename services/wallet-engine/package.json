@@ -21,7 +21,6 @@
   "types": "./dist/index.d.ts",
   "dependencies": {
     "@zwallet/rpc": "workspace:*",
-    "@zwallet/shared-types": "workspace:*",
-    "ethers": "^6.16.0"
+    "@zwallet/shared-types": "workspace:*"
   }
 }
