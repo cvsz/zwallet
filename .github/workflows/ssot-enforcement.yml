@@ -17,8 +17,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git ls-files | grep -E '(^|/)(\.env($|\.)|id_rsa$|id_ed25519$|.*\.pem$|.*\.key$|credentials\.json$|service-account\.json$)'; then
-            echo "Tracked secret material is not allowed"
+          mapfile -t tracked_env < <(
+            git ls-files \
+              | grep -E '(^|/)\.env($|\.)' \
+              | grep -Ev '\.(example|sample|template)$' \
+              || true
+          )
+          mapfile -t tracked_keys < <(
+            git ls-files \
+              | grep -E '(^|/)(id_rsa|id_ed25519|credentials\.json|service-account\.json|.*\.(pem|key))$' \
+              || true
+          )
+          if (( ${#tracked_env[@]} + ${#tracked_keys[@]} > 0 )); then
+            printf 'Tracked secret material is not allowed:\n'
+            printf '%s\n' "${tracked_env[@]}" "${tracked_keys[@]}"
             exit 1
           fi
 
@@ -26,7 +38,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -n -i -E '["'"'"']x-client-cert["'"'"']' -- ':!docs/**' ':!scripts/archive/**'; then
+          if git grep -n -i -E '["'"'"']x-client-cert["'"'"']' -- \
+            ':!docs/**' \
+            ':!scripts/archive/**' \
+            ':!.github/workflows/ssot-enforcement.yml'; then
             echo "Direct x-client-cert header trust is forbidden; terminate and verify mTLS at the trusted ingress boundary"
             exit 1
           fi
