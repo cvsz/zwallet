@@ -6,13 +6,8 @@ import type {
 } from "./types.js";
 import { DevSigner } from "./devSigner.js";
 
-const fallbackDevSigner = new DevSigner();
-const signers: Record<SignerProviderName, TransferSigner> = {
-  dev: fallbackDevSigner,
-  vault: fallbackDevSigner,
-  "aws-kms": fallbackDevSigner,
-  "gcp-kms": fallbackDevSigner,
-  mpc: fallbackDevSigner,
+const signers: Partial<Record<SignerProviderName, TransferSigner>> = {
+  dev: new DevSigner(),
 };
 
 export async function signTransfer(input: SigningRequest): Promise<SigningResult> {
