@@ -20,5 +20,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile=false
       - run: pnpm typecheck
+      - name: Build admin-wallet dependency graph
+        run: pnpm --filter '@zwallet/admin-wallet...' --if-present run build
+      - name: Test bounded admin-wallet request parsing
+        run: pnpm --filter @zwallet/admin-wallet test
       - run: pnpm lint
       - run: pnpm check:circular
