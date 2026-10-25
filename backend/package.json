@@ -10,7 +10,8 @@
     "dev": "npm run -ws dev",
     "lint": "npm run -ws lint",
     "test:tx-flow": "node scripts/tx-lifecycle-test.mjs",
-    "test:swap-flow": "node scripts/swap-execution-test.mjs"
+    "test:swap-flow": "node scripts/swap-execution-test.mjs",
+    "test": "npm run --workspace=@zwallet/mpc-service test"
   },
   "dependencies": {
     "@fastify/rate-limit": "^10.3.0"
