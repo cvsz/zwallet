@@ -15,6 +15,12 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "composite": true
+    "composite": true,
+    "baseUrl": ".",
+    "paths": {
+      "@zwallet/rpc": [
+        "packages/rpc/src/index.ts"
+      ]
+    }
   }
 }
