@@ -2,13 +2,64 @@ name: Chaos Test
 
 on:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type RUN-CHAOS to authorize the isolated chaos test"
+        required: true
+        type: string
+      namespace:
+        description: "Only chaos-lab is permitted"
+        required: true
+        default: chaos-lab
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
-  chaos:
+  static:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - name: Validate chaos harness without cluster access
+        run: |
+          set -euo pipefail
+          bash -n tests/chaos/kill-pod.sh
+          python3 -m unittest discover -s scripts/ci -p 'test_chaos_safety.py'
 
-      - name: Run chaos test
+  chaos:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: chaos-lab
+    env:
+      CHAOS_KUBECONFIG_DATA: ${{ secrets.CHAOS_KUBECONFIG_DATA }}
+      EXPECTED_CHAOS_CONTEXT: ${{ vars.CHAOS_KUBE_CONTEXT }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      TARGET_NAMESPACE: ${{ inputs.namespace }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate isolated chaos admission
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRMATION" == "RUN-CHAOS" ]] || { echo "Missing explicit chaos confirmation" >&2; exit 1; }
+          [[ "$TARGET_NAMESPACE" == "chaos-lab" ]] || { echo "Only the chaos-lab namespace is permitted" >&2; exit 1; }
+          [[ -n "$CHAOS_KUBECONFIG_DATA" ]] || { echo "CHAOS_KUBECONFIG_DATA is not configured" >&2; exit 1; }
+          [[ -n "$EXPECTED_CHAOS_CONTEXT" ]] || { echo "CHAOS_KUBE_CONTEXT is not configured" >&2; exit 1; }
+          [[ ! "$EXPECTED_CHAOS_CONTEXT" =~ [Pp][Rr][Oo][Dd ]] || { echo "Production contexts are forbidden" >&2; exit 1; }
+          mkdir -p "$HOME/.kube"
+          printf '%s' "$CHAOS_KUBECONFIG_DATA" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+          ACTUAL_CONTEXT="$(kubectl config current-context)"
+          [[ "$ACTUAL_CONTEXT" == "$EXPECTED_CHAOS_CONTEXT" ]] || { echo "Kubernetes context mismatch" >&2; exit 1; }
+          [[ ! "$ACTUAL_CONTEXT" =~ [Pp][Rr][Oo][Dd] ]] || { echo "Production contexts are forbidden" >&2; exit 1; }
+          kubectl get namespace "$TARGET_NAMESPACE"
+      - name: Run isolated labeled chaos target
+        env:
+          CONFIRM_CHAOS: ${{ inputs.confirmation }}
+          CHAOS_NAMESPACE: ${{ inputs.namespace }}
         run: bash tests/chaos/kill-pod.sh

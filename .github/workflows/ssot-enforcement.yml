@@ -16,4 +16,4 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/ci/check_forbidden_patterns.py
-          python3 -m unittest discover -s scripts/ci -p 'test_check_forbidden_patterns.py'
+          python3 -m unittest discover -s scripts/ci -p 'test_*.py'
