@@ -3,21 +3,17 @@ name: SSOT Enforcement
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   ssot:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check forbidden patterns
+      - name: Check forbidden runtime source patterns
         run: |
-          if grep -R "process.env" .; then
-            echo "❌ Env secrets not allowed"
-            exit 1
-          fi
-
-          if grep -R "x-client-cert" .; then
-            echo "❌ Header trust violation"
-            exit 1
-          fi
+          set -euo pipefail
+          python3 scripts/ci/check_forbidden_patterns.py
+          python3 -m unittest discover -s scripts/ci -p 'test_*.py'
