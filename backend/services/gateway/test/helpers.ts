@@ -22,12 +22,26 @@ export const fakeRedis = () => {
       return 'OK';
     },
     setex: async (k: string, _s: number, v: string) => { map.set(k, v); return 'OK'; },
-    eval: async (_script: string, _numKeys: number, key: string, legacyPassword: string, passwordHash: string) => {
-      const h = hashes.get(key);
-      if (!h || h.has('password_hash') || h.get('password') !== legacyPassword) return 0;
-      h.set('password_hash', passwordHash);
-      h.delete('password');
-      return 1;
+    eval: async (_script: string, _numKeys: number, key: string, ...args: string[]) => {
+      if (args.length === 3) {
+        const [id, email, passwordHash] = args;
+        let h = hashes.get(key);
+        if (!h) { h = new Map(); hashes.set(key, h); }
+        h.set('id', id);
+        h.set('email', email);
+        h.set('password_hash', passwordHash);
+        h.delete('password');
+        return 1;
+      }
+      if (args.length === 2) {
+        const [legacyPassword, passwordHash] = args;
+        const h = hashes.get(key);
+        if (!h || h.has('password_hash') || h.get('password') !== legacyPassword) return 0;
+        h.set('password_hash', passwordHash);
+        h.delete('password');
+        return 1;
+      }
+      return 0;
     },
     incr: async (k: string) => { const n = (counter.get(k) ?? 0) + 1; counter.set(k, n); return n; },
     expire: async () => 1,
