@@ -7,6 +7,7 @@ The gateway must never write new plaintext passwords to Redis or include passwor
 - New registrations store a salted scrypt hash in `password_hash`.
 - Authentication verifies hashes using constant-time comparison.
 - Existing legacy records are upgraded only after a successful password check. A Redis Lua compare-and-set writes the hash and removes the legacy `password` field atomically.
+- Credential fields are read together with `HMGET`; if a record already has both a hash and a legacy plaintext field, the plaintext field is removed atomically.
 - Failed login attempts do not migrate or modify legacy credentials.
 - Registration audit events contain only the email and device identifier; they never include the submitted password.
 
@@ -28,4 +29,4 @@ Before merge, close this draft PR to leave `main` unchanged. After deployment, d
 
 ## Current verification status
 
-The regression tests are committed in `backend/services/gateway/test/password-security.test.ts`. They have not been executed in this connector-only run. Do not treat the source change as production-ready until executable exact-head CI and independent review pass.
+The regression tests are committed in `backend/services/gateway/test/password-security.test.ts`, `password-state-store.test.ts`, and `password-migration-concurrency.test.ts`. They have not been executed in this connector-only run. Do not treat the source change as production-ready until executable exact-head CI and independent review pass.
