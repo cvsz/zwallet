@@ -49,7 +49,7 @@ describe('security attack paths', () => {
     process.env.JWT_SECRET = 'test-secret';
     const handleAuth = vi.spyOn(CardOrchestrator.prototype, 'handleAuth').mockResolvedValue({ decision: 'approve' });
     const app = buildApp({ rateLimiter: fakeRedis() as any, cache: fakeRedis() as any });
-    const secretCases: Array<string | undefined> = [undefined, '', '   ', '\t\n'];
+    const secretCases: Array<string | undefined> = [undefined, '', '   ', '\t\n', 'short-secret', 'a'.repeat(64), ' leading-' + 's'.repeat(32), 'x'.repeat(16) + '\n' + 'y'.repeat(32)];
 
     try {
       for (const [index, secret] of secretCases.entries()) {
@@ -113,7 +113,7 @@ describe('security attack paths', () => {
   it('atomically rejects concurrent replays of a signed issuer webhook nonce', async () => {
     const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
     const previousJwtSecret = process.env.JWT_SECRET;
-    const secret = 'synthetic-issuer-webhook-secret';
+    const secret = 'synthetic-issuer-webhook-secret-2026';
     const nonce = 'issuer-nonce-concurrent-1';
     process.env.ISSUER_WEBHOOK_SECRET = secret;
     process.env.JWT_SECRET = 'test-secret';
@@ -168,7 +168,7 @@ describe('security attack paths', () => {
   it('fails closed when the replay cache cannot atomically claim a nonce', async () => {
     const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
     const previousJwtSecret = process.env.JWT_SECRET;
-    const secret = 'synthetic-issuer-webhook-secret';
+    const secret = 'synthetic-issuer-webhook-secret-2026';
     const nonce = 'issuer-nonce-no-atomic-cache';
     process.env.ISSUER_WEBHOOK_SECRET = secret;
     process.env.JWT_SECRET = 'test-secret';
