@@ -149,7 +149,7 @@ export const buildApp = (deps: Deps = {}) => {
       webhookSecret !== webhookSecret.trim() ||
       Buffer.byteLength(webhookSecret, 'utf8') < 32 ||
       new Set(webhookSecret).size < 8 ||
-      /[\\x00-\\x1F\\x7F]/.test(webhookSecret)
+      /[\x00-\x1F\x7F]/.test(webhookSecret)
     ) {
       return reply.code(503).send({ error: 'webhook_unavailable' });
     }
