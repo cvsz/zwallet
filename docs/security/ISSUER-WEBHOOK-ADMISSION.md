@@ -4,6 +4,8 @@
 
 The gateway must not authenticate issuer callbacks with a built-in or development fallback. `ISSUER_WEBHOOK_SECRET` must be provisioned through the approved secret manager before issuer authentication callbacks are enabled.
 
+Admission policy: the configured secret must be at least 32 UTF-8 bytes, contain at least 8 distinct characters, have no leading/trailing whitespace, and contain no ASCII control characters. Use a cryptographically random issuer-compatible value. If an existing provider secret does not meet this policy, keep callback admission closed and coordinate rotation with the issuer owner; do not silently trim or transform the secret.
+
 - Missing, empty, or whitespace-only secret: return HTTP 503 with a generic `webhook_unavailable` response before invoking the business handler.
 - Missing signature or nonce: return HTTP 401.
 - Invalid HMAC: return HTTP 401.
