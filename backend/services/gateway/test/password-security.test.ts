@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { GatewayStateStore } from '../src/services/state-store.js';
 import { hashPassword, verifyPassword } from '../src/services/password.js';
+import { registerSchema, loginSchema } from '../src/schemas/index.js';
 import { fakeRedis } from './helpers.js';
 
 const originalJwtSecret = process.env.JWT_SECRET;
@@ -16,6 +17,17 @@ afterEach(() => {
 });
 
 describe('gateway password storage', () => {
+  it('rejects passwords over 1024 characters before invoking password hashing', () => {
+    const payload = {
+      email: 'overlong-password@zwallet.dev',
+      password: 'x'.repeat(1025),
+      deviceId: 'device-overlong-password',
+    };
+
+    expect(registerSchema.safeParse(payload).success).toBe(false);
+    expect(loginSchema.safeParse(payload).success).toBe(false);
+  });
+
   it('hashes passwords with a unique salt and verifies without plaintext storage', async () => {
     const first = await hashPassword('correct-horse-battery');
     const second = await hashPassword('correct-horse-battery');
