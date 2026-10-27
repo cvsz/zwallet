@@ -125,7 +125,7 @@ describeWithRedis('gateway password storage with real Redis', () => {
 
       expect([responseA.statusCode, responseB.statusCode].sort()).toEqual([200, 409]);
       const user = await state.getUser(email);
-      expect(user?.passwordHash).toMatch(/^scrypt\\$/);
+      expect(user?.passwordHash).toMatch(/^scrypt\$/);
       expect(user?.legacyPassword).toBeNull();
 
       const [loginA, loginB] = await Promise.all([
