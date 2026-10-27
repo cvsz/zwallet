@@ -5,17 +5,18 @@
 The gateway must never write new plaintext passwords to Redis or include passwords in audit events.
 
 - New registrations store a salted scrypt hash in `password_hash`.
+- Password inputs are limited to 8–1024 characters before scrypt work begins to bound CPU/memory use from oversized requests.
 - Authentication verifies hashes using constant-time comparison.
 - Existing legacy records are upgraded only after a successful password check. A Redis Lua compare-and-set writes the hash and removes the legacy `password` field atomically.
 - Credential fields are read together with `HMGET`; if a record already has both a hash and a legacy plaintext field, the plaintext field is removed atomically.
 - Failed login attempts do not migrate or modify legacy credentials.
 - Registration audit events contain only the email and device identifier; they never include the submitted password.
 - The root pnpm workspace includes `backend/services/*` so gateway tests and the TypeScript build are part of CI.
-- CI starts a disposable Redis service and runs `password-redis.integration.test.ts` against real Redis Lua execution. The test uses unique keys and deletes them after execution.
+- CI starts a disposable Redis 7.4 service and runs `password-redis.integration.test.ts` against real Redis Lua execution. The test uses unique keys and deletes them after execution.
 
 ## Compatibility and rollout
 
-This is a backward-compatible, lazy migration for existing Redis records. Users with legacy records can continue to sign in; the first successful sign-in upgrades that record. Legacy records for inactive users may still contain plaintext until they sign in or an operator performs an approved migration.
+This is a backward-compatible, lazy migration for existing Redis records. Users with legacy records can continue to sign in; the first successful sign-in upgrades that record. Passwords longer than 1024 characters are rejected by both registration and login. Legacy records for inactive users may still contain plaintext until they sign in or an operator performs an approved migration.
 
 Before production admission:
 
