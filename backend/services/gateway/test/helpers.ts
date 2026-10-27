@@ -41,6 +41,12 @@ export const fakeRedis = () => {
         h.delete('password');
         return 1;
       }
+      if (args.length === 0) {
+        const h = hashes.get(key);
+        if (!h?.has('password_hash')) return 0;
+        h.delete('password');
+        return 1;
+      }
       return 0;
     },
     incr: async (k: string) => { const n = (counter.get(k) ?? 0) + 1; counter.set(k, n); return n; },
@@ -55,6 +61,7 @@ export const fakeRedis = () => {
       return args.length / 2;
     },
     hget: async (k: string, f: string) => hashes.get(k)?.get(f) ?? null,
+    hmget: async (k: string, ...fields: string[]) => fields.map((field) => hashes.get(k)?.get(field) ?? null),
     lpush: async (k: string, v: string) => {
       let l = lists.get(k);
       if (!l) { l = []; lists.set(k, l); }
