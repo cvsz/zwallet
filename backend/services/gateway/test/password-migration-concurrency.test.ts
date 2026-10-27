@@ -1,7 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { GatewayStateStore } from '../src/services/state-store.js';
 import { fakeRedis } from './helpers.js';
+
+const originalJwtSecret = process.env.JWT_SECRET;
+beforeEach(() => { process.env.JWT_SECRET = 'test-secret'; });
+afterEach(() => {
+  if (originalJwtSecret === undefined) delete process.env.JWT_SECRET;
+  else process.env.JWT_SECRET = originalJwtSecret;
+});
 
 describe('legacy password migration concurrency', () => {
   it('converges concurrent successful sign-ins on one hashed credential', async () => {
