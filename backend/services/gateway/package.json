@@ -6,7 +6,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "test": "vitest run",
+    "test": "vitest run && node --test test/legacy-password-inventory.node.mjs",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
     "lint": "echo lint-gateway"
