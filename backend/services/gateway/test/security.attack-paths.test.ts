@@ -47,6 +47,7 @@ describe('security attack paths', () => {
     const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
     const previousJwtSecret = process.env.JWT_SECRET;
     process.env.JWT_SECRET = 'test-secret';
+    const handleAuth = vi.spyOn(CardOrchestrator.prototype, 'handleAuth').mockResolvedValue({ decision: 'approve' });
     const app = buildApp({ rateLimiter: fakeRedis() as any, cache: fakeRedis() as any });
     const secretCases: Array<string | undefined> = [undefined, '', '   ', '\t\n'];
 
@@ -72,8 +73,10 @@ describe('security attack paths', () => {
         expect(response.statusCode).toBe(503);
         expect(response.json()).toEqual({ error: 'webhook_unavailable' });
       }
+      expect(handleAuth).not.toHaveBeenCalled();
     } finally {
       await app.close();
+      handleAuth.mockRestore();
       if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
       else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
       if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
