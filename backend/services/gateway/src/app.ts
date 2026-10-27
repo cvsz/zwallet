@@ -14,7 +14,14 @@ import { OfframpService } from './services/liquidity/offramp-service.js';
 import { CardOrchestrator } from './services/card/card-orchestrator.js';
 import { KycService } from './services/compliance/kyc-service.js';
 
-type Deps = { rateLimiter?: { incr: (k: string) => Promise<number>; expire: (k: string, s: number) => Promise<number> }; cache?: { get: (k: string) => Promise<string | null>; setex: (k: string, s: number, v: string) => Promise<unknown> } };
+type Deps = {
+  rateLimiter?: { incr: (k: string) => Promise<number>; expire: (k: string, s: number) => Promise<number> };
+  cache?: {
+    get: (k: string) => Promise<string | null>;
+    setex: (k: string, s: number, v: string) => Promise<unknown>;
+    set?: (k: string, v: string, mode: 'EX', seconds: string, condition: 'NX') => Promise<string | null>;
+  };
+};
 
 export const buildApp = (deps: Deps = {}) => {
   const app = Fastify({ logger: false });
@@ -146,9 +153,19 @@ export const buildApp = (deps: Deps = {}) => {
       return reply.code(401).send({ error: 'invalid_webhook_signature' });
     }
     const nonceKey = `issuer:webhook:nonce:${String(nonce)}`;
-    const seen = await cache.get(nonceKey);
-    if (seen) return reply.code(409).send({ error: 'replay_detected' });
-    await cache.setex(nonceKey, 300, '1');
+    if (typeof cache.set !== 'function') {
+      return reply.code(503).send({ error: 'webhook_replay_protection_unavailable' });
+    }
+    let nonceClaim: string | null;
+    try {
+      nonceClaim = await cache.set(nonceKey, '1', 'EX', '300', 'NX');
+    } catch {
+      return reply.code(503).send({ error: 'webhook_replay_protection_unavailable' });
+    }
+    if (nonceClaim === null) return reply.code(409).send({ error: 'replay_detected' });
+    if (nonceClaim !== 'OK') {
+      return reply.code(503).send({ error: 'webhook_replay_protection_unavailable' });
+    }
     const parsed = issuerAuthWebhookSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     return cardOrchestrator.handleAuth(parsed.data);

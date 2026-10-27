@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { fakeRedis, registerAndLogin, resetStore } from './helpers.js';
@@ -105,4 +106,95 @@ describe('security attack paths', () => {
 
     await app.close();
   });
+  it('atomically rejects concurrent replays of a signed issuer webhook nonce', async () => {
+    const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    const previousJwtSecret = process.env.JWT_SECRET;
+    const secret = 'synthetic-issuer-webhook-secret';
+    const nonce = 'issuer-nonce-concurrent-1';
+    process.env.ISSUER_WEBHOOK_SECRET = secret;
+    process.env.JWT_SECRET = 'test-secret';
+    const redis = fakeRedis();
+    const app = buildApp({ rateLimiter: redis as any, cache: redis as any });
+    const payload = {
+      userId: '00000000-0000-4000-8000-000000000001',
+      cardId: 'card-123456',
+      amount: 1,
+      currency: 'USD',
+      mcc: '123',
+      merchant: 'Test Merchant',
+      authId: 'auth-123456',
+    };
+    const signature = createHmac('sha256', secret)
+      .update(`${nonce}.${JSON.stringify(payload)}`)
+      .digest('hex');
+    const sendWebhook = () => app.inject({
+      method: 'POST',
+      url: '/v1/webhooks/issuer/auth',
+      headers: {
+        'x-issuer-nonce': nonce,
+        'x-issuer-signature': signature,
+        'content-type': 'application/json',
+      },
+      payload,
+    });
+
+    try {
+      const responses = await Promise.all([sendWebhook(), sendWebhook()]);
+      expect(responses.filter((response) => response.statusCode === 409)).toHaveLength(1);
+      expect(responses.filter((response) => response.statusCode !== 409)).toHaveLength(1);
+      expect(await redis.get(`issuer:webhook:nonce:${nonce}`)).toBe('1');
+    } finally {
+      await app.close();
+      if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
+      else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
+      if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
+      else process.env.JWT_SECRET = previousJwtSecret;
+    }
+  });
+
+  it('fails closed when the replay cache cannot atomically claim a nonce', async () => {
+    const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    const previousJwtSecret = process.env.JWT_SECRET;
+    const secret = 'synthetic-issuer-webhook-secret';
+    const nonce = 'issuer-nonce-no-atomic-cache';
+    process.env.ISSUER_WEBHOOK_SECRET = secret;
+    process.env.JWT_SECRET = 'test-secret';
+    const redis = fakeRedis();
+    const cacheWithoutAtomicClaim = { get: redis.get, setex: redis.setex };
+    const app = buildApp({ rateLimiter: redis as any, cache: cacheWithoutAtomicClaim as any });
+    const payload = {
+      userId: '00000000-0000-4000-8000-000000000001',
+      cardId: 'card-123456',
+      amount: 1,
+      currency: 'USD',
+      mcc: '123',
+      merchant: 'Test Merchant',
+      authId: 'auth-123456',
+    };
+    const signature = createHmac('sha256', secret)
+      .update(`${nonce}.${JSON.stringify(payload)}`)
+      .digest('hex');
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/webhooks/issuer/auth',
+        headers: {
+          'x-issuer-nonce': nonce,
+          'x-issuer-signature': signature,
+          'content-type': 'application/json',
+        },
+        payload,
+      });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toEqual({ error: 'webhook_replay_protection_unavailable' });
+    } finally {
+      await app.close();
+      if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
+      else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
+      if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
+      else process.env.JWT_SECRET = previousJwtSecret;
+    }
+  });
+
 });
