@@ -7,6 +7,7 @@ type CacheLike = {
   lpush: (k: string, v: string) => Promise<number>;
   lrange: (k: string, start: number, stop: number) => Promise<string[]>;
   hget: (k: string, f: string) => Promise<string | null>;
+  hmget: (k: string, ...fields: string[]) => Promise<(string | null)[]>;
   hset: (k: string, ...args: string[]) => Promise<number>;
   del: (k: string) => Promise<number>;
   eval: (script: string, numKeys: number, ...args: string[]) => Promise<unknown>;
@@ -50,13 +51,35 @@ export class GatewayStateStore {
   }
 
   async getUser(email: string) {
-    const id = await this.redis.hget(`user:${email}`, 'id');
+    const key = `user:${email}`;
+    let fields = await this.redis.hmget(key, 'id', 'email', 'password_hash', 'password');
+    if (!fields[0]) return null;
+
+    // Retry once if a concurrent legacy-password migration changed the record between reads.
+    if (!fields[2] && fields[3] === null) {
+      fields = await this.redis.hmget(key, 'id', 'email', 'password_hash', 'password');
+      if (!fields[0]) return null;
+    }
+
+    const [id, storedEmail, passwordHash, legacyPassword] = fields;
     if (!id) return null;
+
+    if (passwordHash && legacyPassword !== null) {
+      const cleanup = `
+        if redis.call('HGET', KEYS[1], 'password_hash') then
+          redis.call('HDEL', KEYS[1], 'password')
+          return 1
+        end
+        return 0
+      `;
+      await this.redis.eval(cleanup, 1, key);
+    }
+
     return {
       id,
-      email: await this.redis.hget(`user:${email}`, 'email') ?? email,
-      passwordHash: await this.redis.hget(`user:${email}`, 'password_hash'),
-      legacyPassword: await this.redis.hget(`user:${email}`, 'password'),
+      email: storedEmail ?? email,
+      passwordHash,
+      legacyPassword: passwordHash ? null : legacyPassword,
     };
   }
 
