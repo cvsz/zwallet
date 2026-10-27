@@ -13,6 +13,7 @@ describeWithRedis('gateway password storage with real Redis', () => {
   let redis: Redis | undefined;
   let state: GatewayStateStore;
   const createEmail = `ci-create-${randomUUID()}@example.test`;
+  const existingEmail = `ci-existing-${randomUUID()}@example.test`;
   const migrationEmail = `ci-migrate-${randomUUID()}@example.test`;
   const staleEmail = `ci-stale-${randomUUID()}@example.test`;
 
@@ -25,7 +26,7 @@ describeWithRedis('gateway password storage with real Redis', () => {
 
   afterAll(async () => {
     if (redis) {
-      for (const email of [createEmail, migrationEmail, staleEmail]) {
+      for (const email of [createEmail, existingEmail, migrationEmail, staleEmail]) {
         const userId = await redis.hget(`user:${email}`, 'id');
         await redis.del(`user:${email}`);
         if (userId) await redis.del(`devices:${userId}`);
@@ -36,24 +37,38 @@ describeWithRedis('gateway password storage with real Redis', () => {
     else process.env.JWT_SECRET = originalJwtSecret;
   });
 
-  it('atomically replaces legacy fields when creating a user', async () => {
-    await redis!.hset(
-      `user:${createEmail}`,
-      'id', 'old-user-id',
-      'email', createEmail,
-      'password', 'legacy-plaintext',
-    );
-
+  it('creates a new user with a password hash and no plaintext field', async () => {
     const created = await state.createUser(createEmail, 'scrypt$integration-test-hash', 'device-create');
+    expect(created).not.toBeNull();
+
     const [storedId, storedEmail, passwordHash, legacyPassword] = await redis!.hmget(
       `user:${createEmail}`, 'id', 'email', 'password_hash', 'password',
     );
 
-    expect(storedId).toBe(created.id);
+    expect(storedId).toBe(created!.id);
     expect(storedEmail).toBe(createEmail);
     expect(passwordHash).toBe('scrypt$integration-test-hash');
     expect(legacyPassword).toBeNull();
-    expect(await redis!.hget(`devices:${created.id}`, 'device-create')).toBe('1');
+    expect(await redis!.hget(`devices:${created!.id}`, 'device-create')).toBe('1');
+  });
+
+  it('does not overwrite an existing account or bind the losing device', async () => {
+    const existingHash = `scrypt${'a'.repeat(32)}${'b'.repeat(128)}`;
+    await redis!.hset(
+      `user:${existingEmail}`,
+      'id', 'existing-user-id',
+      'email', existingEmail,
+      'password_hash', existingHash,
+    );
+    await redis!.hset('devices:existing-user-id', 'existing-device', '1');
+
+    const created = await state.createUser(existingEmail, 'scrypt$replacement-hash', 'device-should-not-bind');
+
+    expect(created).toBeNull();
+    expect(await redis!.hget(`user:${existingEmail}`, 'id')).toBe('existing-user-id');
+    expect(await redis!.hget(`user:${existingEmail}`, 'password_hash')).toBe(existingHash);
+    expect(await redis!.hget('devices:existing-user-id', 'existing-device')).toBe('1');
+    expect(await redis!.hget('devices:existing-user-id', 'device-should-not-bind')).toBeNull();
   });
 
   it('allows only one concurrent compare-and-set migration to win', async () => {
