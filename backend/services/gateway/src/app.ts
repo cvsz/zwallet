@@ -135,7 +135,10 @@ export const buildApp = (deps: Deps = {}) => {
     const signature = req.headers['x-issuer-signature'];
     const nonce = req.headers['x-issuer-nonce'];
     if (!signature || !nonce) return reply.code(401).send({ error: 'missing_webhook_signature' });
-    const webhookSecret = process.env.ISSUER_WEBHOOK_SECRET ?? 'local-webhook-secret';
+    const webhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    if (!webhookSecret?.trim()) {
+      return reply.code(503).send({ error: 'webhook_unavailable' });
+    }
     const payload = JSON.stringify(req.body ?? {});
     const expected = createHmac('sha256', webhookSecret).update(`${String(nonce)}.${payload}`).digest('hex');
     const provided = String(signature);
