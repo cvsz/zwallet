@@ -142,7 +142,7 @@ export const buildApp = (deps: Deps = {}) => {
     const signature = req.headers['x-issuer-signature'];
     const nonce = req.headers['x-issuer-nonce'];
     if (!signature || !nonce) return reply.code(401).send({ error: 'missing_webhook_signature' });
-    if (typeof nonce !== 'string' || nonce.length > 256 || /[\\s\\x00-\\x1F\\x7F]/.test(nonce)) {
+    if (typeof nonce !== 'string' || nonce.length > 256 || /[\s\x00-\x1F\x7F]/.test(nonce)) {
       return reply.code(400).send({ error: 'invalid_webhook_nonce' });
     }
     const webhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
