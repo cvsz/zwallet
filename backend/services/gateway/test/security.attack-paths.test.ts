@@ -127,10 +127,11 @@ describe('security attack paths', () => {
     const signature = createHmac('sha256', secret)
       .update(`${nonce}.${JSON.stringify(payload)}`)
       .digest('hex');
-    const sendWebhook = () => app.inject({
+    const sendWebhook = (globalNonce: string) => app.inject({
       method: 'POST',
       url: '/v1/webhooks/issuer/auth',
       headers: {
+        'x-nonce': globalNonce,
         'x-issuer-nonce': nonce,
         'x-issuer-signature': signature,
         'content-type': 'application/json',
@@ -139,7 +140,10 @@ describe('security attack paths', () => {
     });
 
     try {
-      const responses = await Promise.all([sendWebhook(), sendWebhook()]);
+      const responses = await Promise.all([
+        sendWebhook('global-issuer-concurrent-a'),
+        sendWebhook('global-issuer-concurrent-b'),
+      ]);
       expect(responses.filter((response) => response.statusCode === 409)).toHaveLength(1);
       expect(responses.filter((response) => response.statusCode !== 409)).toHaveLength(1);
       expect(await redis.get(`issuer:webhook:nonce:${nonce}`)).toBe('1');
@@ -180,6 +184,7 @@ describe('security attack paths', () => {
         method: 'POST',
         url: '/v1/webhooks/issuer/auth',
         headers: {
+          'x-nonce': 'global-issuer-no-atomic-cache',
           'x-issuer-nonce': nonce,
           'x-issuer-signature': signature,
           'content-type': 'application/json',
