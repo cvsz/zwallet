@@ -43,7 +43,7 @@ describe('security attack paths', () => {
     await app.close();
   });
 
-  it('fails closed when the issuer webhook secret is missing or whitespace-only', async () => {
+  it('fails closed when the issuer webhook secret is missing, weak, or malformed', async () => {
     const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
     const previousJwtSecret = process.env.JWT_SECRET;
     process.env.JWT_SECRET = 'test-secret';
