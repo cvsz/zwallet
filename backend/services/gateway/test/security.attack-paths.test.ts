@@ -43,6 +43,43 @@ describe('security attack paths', () => {
     await app.close();
   });
 
+  it('rejects oversized or whitespace-containing issuer nonces before signature verification', async () => {
+    const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    const previousJwtSecret = process.env.JWT_SECRET;
+    process.env.ISSUER_WEBHOOK_SECRET = 'synthetic-issuer-webhook-secret-2026';
+    process.env.JWT_SECRET = 'test-secret';
+    const redis = fakeRedis();
+    const handleAuth = vi.spyOn(CardOrchestrator.prototype, 'handleAuth').mockResolvedValue({ decision: 'approve' });
+    const app = buildApp({ rateLimiter: redis as any, cache: redis as any });
+    const invalidNonces = ['n'.repeat(257), 'nonce with space'];
+
+    try {
+      for (const [index, nonce] of invalidNonces.entries()) {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/v1/webhooks/issuer/auth',
+          headers: {
+            'x-nonce': `global-invalid-issuer-nonce-${index}`,
+            'x-issuer-nonce': nonce,
+            'x-issuer-signature': '0'.repeat(64),
+            'content-type': 'application/json',
+          },
+          payload: {},
+        });
+        expect(response.statusCode).toBe(400);
+        expect(response.json()).toEqual({ error: 'invalid_webhook_nonce' });
+      }
+      expect(handleAuth).not.toHaveBeenCalled();
+    } finally {
+      handleAuth.mockRestore();
+      await app.close();
+      if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
+      else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
+      if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
+      else process.env.JWT_SECRET = previousJwtSecret;
+    }
+  });
+
   it('fails closed when the issuer webhook secret is missing, weak, or malformed', async () => {
     const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
     const previousJwtSecret = process.env.JWT_SECRET;
