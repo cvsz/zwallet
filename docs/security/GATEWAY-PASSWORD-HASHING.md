@@ -55,3 +55,18 @@ The gateway regression tests and real-Redis integration tests are committed on t
 - Clients may supply `Idempotency-Key` (1–128 characters from `A-Z a-z 0-9 . _ : -`) to replay a completed registration result safely. If an identical key is still in progress, the API returns HTTP 409 (`registration_in_progress`) and the client may retry the same key.
 - When the header is omitted, each registration attempt receives a new request key; duplicate accounts are still rejected atomically.
 - Idempotency keys are hashed before being used in Redis keys. The request password is never included in the key or audit event.
+
+
+## Read-only legacy credential inventory
+
+A read-only inventory helper is available at `backend/services/gateway/scripts/inventory-legacy-passwords.mjs`. It uses Redis `SCAN` plus `HEXISTS` only; it does not read credential field values, write/delete keys, migrate records, or emit Redis key names/email addresses.
+
+Before running it, an operator must select the approved Redis target and provision a least-privilege Redis ACL that allows only the required read operations. Inject `REDIS_URL` through the approved secret manager; never paste it into a shell transcript or log. The helper has no default Redis target and refuses to connect without the explicit `--confirm-read-only` flag.
+
+Run from the repository root:
+
+```sh
+pnpm --filter @zwallet/gateway exec node scripts/inventory-legacy-passwords.mjs --confirm-read-only
+```
+
+The output contains aggregate counts only: legacy-plaintext-only records, mixed legacy/hash records, hash-only records, and records missing both credential fields. The inventory is **not a transactionally consistent snapshot** because Redis `SCAN` is not atomic; repeat during a quiet window until counts stabilize. Store the aggregate output only in the restricted operational evidence location. This tool is inventory-only and must not be treated as a migration or password-reset action.
