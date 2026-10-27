@@ -8,15 +8,9 @@ export const fakeRedis = () => {
 
   return {
     get: async (k: string) => map.get(k) ?? counter.get(k)?.toString() ?? null,
-    set: async (k: string, v: string, mode?: string, duration?: string) => {
-      if (mode === 'EX' || mode === 'PX') {
-        // Simple mock: if it exists, it's a "lock failure" for some patterns,
-        // but here withIdempotency uses set(key, '1', 'EX', ttl) as a lock.
-        // In ioredis, set(k, v, 'EX', t, 'NX') returns 'OK' or null.
-        // The current state-store uses set(k, '1', 'EX', ttl) without NX.
-        // Actually line 28 in state-store.ts: await this.redis.set(`idem:${key}:lock`, '1', 'EX', String(ttlSec));
-        // It doesn't use NX! So it always succeeds unless it's a different implementation.
-        // Wait, if it doesn't use NX, it's not a lock.
+    set: async (k: string, v: string, _mode?: string, _duration?: string, condition?: string) => {
+      if (condition === 'NX' && (map.has(k) || counter.has(k) || hashes.has(k) || lists.has(k))) {
+        return null;
       }
       map.set(k, v);
       return 'OK';
@@ -64,4 +58,3 @@ export const registerAndLogin = async (app: any) => {
   const login = await app.inject({ method: 'POST', url: '/v1/auth/login', headers: { 'x-nonce': 'login-nonce' }, payload: { email: 'test@zwallet.dev', password: 'password1', deviceId: 'device-12345678' } });
   return login.json().accessToken as string;
 };
-
