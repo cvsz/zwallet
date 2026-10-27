@@ -46,3 +46,12 @@ Before merge, close this draft PR to leave `main` unchanged. After deployment, d
 ## Current verification status
 
 The gateway regression tests and real-Redis integration tests are committed on the candidate branch but have not been executed in this connector-only run. Exact-head CI must demonstrate test and build success, and independent review must close the blockers before production admission.
+
+
+## Registration integrity and idempotency
+
+- Account creation uses a Redis Lua guard to refuse an existing `user:<email>` record; it never replaces the existing user ID or password hash.
+- A duplicate registration with a different request key returns HTTP 409 (`account_already_exists`).
+- Clients may supply `Idempotency-Key` (1–128 characters from `A-Z a-z 0-9 . _ : -`) to replay a completed registration result safely. If an identical key is still in progress, the API returns HTTP 409 (`registration_in_progress`) and the client may retry the same key.
+- When the header is omitted, each registration attempt receives a new request key; duplicate accounts are still rejected atomically.
+- Idempotency keys are hashed before being used in Redis keys. The request password is never included in the key or audit event.

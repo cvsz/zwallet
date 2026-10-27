@@ -71,6 +71,57 @@ describe('gateway password storage', () => {
     await app.close();
   });
 
+  it('rejects duplicate registration without changing the existing account or device binding', async () => {
+    const redis = fakeRedis();
+    const app = buildApp({ rateLimiter: redis as any, cache: redis as any });
+    const email = 'duplicate-registration@zwallet.dev';
+    const originalPassword = 'original-password-123';
+    const originalDevice = 'original-device-123';
+    const duplicatePassword = 'attacker-password-456';
+    const duplicateDevice = 'attacker-device-456';
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/register',
+      headers: { 'idempotency-key': 'registration-original-001' },
+      payload: { email, password: originalPassword, deviceId: originalDevice },
+    });
+    expect(first.statusCode).toBe(200);
+
+    const state = new GatewayStateStore(redis as any);
+    const before = await state.getUser(email);
+    expect(before).not.toBeNull();
+
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/register',
+      headers: { 'idempotency-key': 'registration-duplicate-002' },
+      payload: { email, password: duplicatePassword, deviceId: duplicateDevice },
+    });
+    expect(duplicate.statusCode).toBe(409);
+
+    const after = await state.getUser(email);
+    expect(after?.id).toBe(before?.id);
+    expect(after?.passwordHash).toBe(before?.passwordHash);
+    expect(await state.hasDevice(before!.id, originalDevice)).toBe(true);
+    expect(await state.hasDevice(before!.id, duplicateDevice)).toBe(false);
+
+    const originalLogin = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      payload: { email, password: originalPassword, deviceId: originalDevice },
+    });
+    expect(originalLogin.statusCode).toBe(200);
+
+    const duplicateLogin = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      payload: { email, password: duplicatePassword, deviceId: duplicateDevice },
+    });
+    expect(duplicateLogin.statusCode).toBe(401);
+    await app.close();
+  });
+
   it('atomically upgrades a valid legacy plaintext record on login', async () => {
     const redis = fakeRedis();
     const email = 'legacy@zwallet.dev';

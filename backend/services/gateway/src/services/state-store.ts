@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 type CacheLike = {
   get: (k: string) => Promise<string | null>;
   setex: (k: string, s: number, v: string) => Promise<unknown>;
-  set: (k: string, v: string, mode?: string, cond?: string) => Promise<unknown>;
+  set: (k: string, v: string, mode?: string, duration?: string, condition?: string) => Promise<unknown>;
   lpush: (k: string, v: string) => Promise<number>;
   lrange: (k: string, start: number, stop: number) => Promise<string[]>;
   hget: (k: string, f: string) => Promise<string | null>;
@@ -27,25 +27,28 @@ export class GatewayStateStore {
   constructor(private readonly redis: CacheLike) {}
 
   async withIdempotency<T>(key: string, ttlSec: number, run: () => Promise<T>): Promise<{ deduped: boolean; result: T }> {
-    const lock = await this.redis.set(`idem:${key}:lock`, '1', 'EX', String(ttlSec));
-    if (lock === null) {
-      const existing = await this.redis.get(`idem:${key}:result`);
+    const lockKey = `idem:${key}:lock`;
+    const resultKey = `idem:${key}:result`;
+    const lock = await this.redis.set(lockKey, '1', 'EX', String(ttlSec), 'NX');
+    if (lock !== 'OK') {
+      const existing = await this.redis.get(resultKey);
       if (!existing) throw new Error('idempotency_conflict');
       return { deduped: true, result: JSON.parse(existing) as T };
     }
     const result = await run();
-    await this.redis.setex(`idem:${key}:result`, ttlSec, JSON.stringify(result));
+    await this.redis.setex(resultKey, ttlSec, JSON.stringify(result));
     return { deduped: false, result };
   }
 
-  async createUser(email: string, passwordHash: string, deviceId: string) {
+  async createUser(email: string, passwordHash: string, deviceId: string): Promise<{ id: string; email: string } | null> {
     const userId = randomUUID();
     const script = `
+      if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
       redis.call('HSET', KEYS[1], 'id', ARGV[1], 'email', ARGV[2], 'password_hash', ARGV[3])
-      redis.call('HDEL', KEYS[1], 'password')
       return 1
     `;
-    await this.redis.eval(script, 1, `user:${email}`, userId, email, passwordHash);
+    const created = Number(await this.redis.eval(script, 1, `user:${email}`, userId, email, passwordHash)) === 1;
+    if (!created) return null;
     await this.redis.hset(`devices:${userId}`, deviceId, '1');
     return { id: userId, email };
   }
