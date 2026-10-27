@@ -143,7 +143,14 @@ export const buildApp = (deps: Deps = {}) => {
     const nonce = req.headers['x-issuer-nonce'];
     if (!signature || !nonce) return reply.code(401).send({ error: 'missing_webhook_signature' });
     const webhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
-    if (!webhookSecret?.trim()) {
+    // Fail closed on missing, weak, padded, or control-character secrets. Do not log key material.
+    if (
+      !webhookSecret ||
+      webhookSecret !== webhookSecret.trim() ||
+      Buffer.byteLength(webhookSecret, 'utf8') < 32 ||
+      new Set(webhookSecret).size < 8 ||
+      /[\\x00-\\x1F\\x7F]/.test(webhookSecret)
+    ) {
       return reply.code(503).send({ error: 'webhook_unavailable' });
     }
     const payload = JSON.stringify(req.body ?? {});
