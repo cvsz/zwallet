@@ -39,7 +39,12 @@ export class GatewayStateStore {
 
   async createUser(email: string, passwordHash: string, deviceId: string) {
     const userId = randomUUID();
-    await this.redis.hset(`user:${email}`, 'id', userId, 'email', email, 'password_hash', passwordHash);
+    const script = `
+      redis.call('HSET', KEYS[1], 'id', ARGV[1], 'email', ARGV[2], 'password_hash', ARGV[3])
+      redis.call('HDEL', KEYS[1], 'password')
+      return 1
+    `;
+    await this.redis.eval(script, 1, `user:${email}`, userId, email, passwordHash);
     await this.redis.hset(`devices:${userId}`, deviceId, '1');
     return { id: userId, email };
   }
