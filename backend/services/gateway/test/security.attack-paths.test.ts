@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.js';
+import { CardOrchestrator } from '../src/services/card/card-orchestrator.js';
 import { fakeRedis, registerAndLogin, resetStore } from './helpers.js';
 
 describe('security attack paths', () => {
@@ -114,6 +115,7 @@ describe('security attack paths', () => {
     process.env.ISSUER_WEBHOOK_SECRET = secret;
     process.env.JWT_SECRET = 'test-secret';
     const redis = fakeRedis();
+    const handleAuth = vi.spyOn(CardOrchestrator.prototype, 'handleAuth').mockResolvedValue({ decision: 'approve' });
     const app = buildApp({ rateLimiter: redis as any, cache: redis as any });
     const payload = {
       userId: '00000000-0000-4000-8000-000000000001',
@@ -144,10 +146,14 @@ describe('security attack paths', () => {
         sendWebhook('global-issuer-concurrent-a'),
         sendWebhook('global-issuer-concurrent-b'),
       ]);
-      expect(responses.filter((response) => response.statusCode === 409)).toHaveLength(1);
-      expect(responses.filter((response) => response.statusCode !== 409)).toHaveLength(1);
+      expect(responses.map((response) => response.statusCode).sort((a, b) => a - b)).toEqual([200, 409]);
+      const accepted = responses.find((response) => response.statusCode === 200);
+      expect(accepted?.json()).toEqual({ decision: 'approve' });
+      expect(handleAuth).toHaveBeenCalledTimes(1);
+      expect(handleAuth).toHaveBeenCalledWith(payload);
       expect(await redis.get(`issuer:webhook:nonce:${nonce}`)).toBe('1');
     } finally {
+      handleAuth.mockRestore();
       await app.close();
       if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
       else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
