@@ -10,6 +10,8 @@ The gateway must never write new plaintext passwords to Redis or include passwor
 - Credential fields are read together with `HMGET`; if a record already has both a hash and a legacy plaintext field, the plaintext field is removed atomically.
 - Failed login attempts do not migrate or modify legacy credentials.
 - Registration audit events contain only the email and device identifier; they never include the submitted password.
+- The root pnpm workspace includes `backend/services/*` so gateway tests and the TypeScript build are part of CI.
+- CI starts a disposable Redis service and runs `password-redis.integration.test.ts` against real Redis Lua execution. The test uses unique keys and deletes them after execution.
 
 ## Compatibility and rollout
 
@@ -22,6 +24,19 @@ Before production admission:
 3. Verify correct legacy credentials upgrade atomically, incorrect credentials do not change the record, and concurrent legacy sign-ins converge on one valid hash.
 4. Inventory remaining legacy records without exporting or logging their password values; define an operator-approved migration or password-reset plan for dormant accounts.
 5. Verify backups and recovery procedures do not expose or reintroduce plaintext credentials.
+6. Confirm `pnpm-lock.yaml` contains the gateway importer and all resolved dependencies before release; the current root CI uses a non-frozen install and must not be treated as proof of a reproducible dependency graph until the lockfile is committed and frozen-lockfile validation is enabled.
+
+## Validation commands
+
+With a disposable Redis instance available at `REDIS_URL`:
+
+```sh
+pnpm install --frozen-lockfile=false
+pnpm --filter @zwallet/gateway test
+pnpm --filter @zwallet/gateway build
+```
+
+The integration test skips when `REDIS_URL` is absent. CI must provide the disposable Redis service so the real-Lua tests are not skipped.
 
 ## Rollback
 
@@ -29,4 +44,4 @@ Before merge, close this draft PR to leave `main` unchanged. After deployment, d
 
 ## Current verification status
 
-The regression tests are committed in `backend/services/gateway/test/password-security.test.ts`, `password-state-store.test.ts`, and `password-migration-concurrency.test.ts`. They have not been executed in this connector-only run. Do not treat the source change as production-ready until executable exact-head CI and independent review pass.
+The gateway regression tests and real-Redis integration tests are committed on the candidate branch but have not been executed in this connector-only run. Exact-head CI must demonstrate test and build success, and independent review must close the blockers before production admission.
