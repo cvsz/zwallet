@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 type CacheLike = {
   get: (k: string) => Promise<string | null>;
   setex: (k: string, s: number, v: string) => Promise<unknown>;
-  set: (k: string, v: string, mode?: string, cond?: string) => Promise<unknown>;
+  set: (k: string, v: string, mode?: string, duration?: string, condition?: string) => Promise<unknown>;
   lpush: (k: string, v: string) => Promise<number>;
   lrange: (k: string, start: number, stop: number) => Promise<string[]>;
   hget: (k: string, f: string) => Promise<string | null>;
@@ -25,8 +25,8 @@ export class GatewayStateStore {
   constructor(private readonly redis: CacheLike) {}
 
   async withIdempotency<T>(key: string, ttlSec: number, run: () => Promise<T>): Promise<{ deduped: boolean; result: T }> {
-    const lock = await this.redis.set(`idem:${key}:lock`, '1', 'EX', String(ttlSec));
-    if (lock === null) {
+    const lock = await this.redis.set(`idem:${key}:lock`, '1', 'EX', String(ttlSec), 'NX');
+    if (lock !== 'OK') {
       const existing = await this.redis.get(`idem:${key}:result`);
       if (!existing) throw new Error('idempotency_conflict');
       return { deduped: true, result: JSON.parse(existing) as T };
