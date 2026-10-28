@@ -25,7 +25,7 @@ The permanent keys need an approved retention/reconciliation policy. Do not dele
 
 ## Operator reconciliation
 
-1. Find the event by the SHA-256 fingerprint in structured logs and the Redis key `issuer:webhook:auth:<sha256(authId)>`; never place raw provider secrets or full cardholder data in logs.
+1. Find the event by the SHA-256 fingerprint in structured logs and the Redis key `issuer:webhook:auth:<sha256(ISSUER_ID + NUL + authId)>`; never place raw provider secrets or full cardholder data in logs.
 2. Verify the provider's authoritative authorization status and downstream liquidity ledger.
 3. If the record is `processing`, reconcile the downstream side effect before any manual state change.
 4. Preserve an audit trail of the operator, evidence, decision, and timestamp.
