@@ -7,7 +7,7 @@ The issuer authentication webhook uses two distinct identifiers:
 - `x-issuer-nonce` protects a signed HTTP delivery from transport replay.
 - `authId` identifies the business authorization event and prevents the same authorization from invoking risk evaluation or liquidity pre-funding again when a provider retries with a fresh nonce.
 
-The operator must provision a stable non-secret `ISSUER_ID` (1–128 ASCII letters, digits, dot, underscore, colon, or hyphen). Missing or malformed identity fails closed with HTTP 503. The gateway atomically claims a hashed `ISSUER_ID + authId` key in Redis with `SET ... NX`. The key contains no raw authorization identifier and has no automatic TTL. The payload fingerprint binds the idempotency record to the validated event. A retry with the same identifier and same payload returns the stored completed result; a different payload with the same identifier receives HTTP 409.
+The operator must provision a stable non-secret `ISSUER_ID` (1–128 ASCII letters, digits, dot, underscore, colon, or hyphen). Missing or malformed identity fails closed with HTTP 503. The gateway atomically claims the transport nonce and a hashed `ISSUER_ID + authId` key in one Redis Lua script. Both keys include the same Redis Cluster hash tag scoped to the non-secret `ISSUER_ID`, so the multi-key script remains single-slot. The event key contains no raw authorization identifier and has no automatic TTL. The payload fingerprint binds the idempotency record to the validated event. A retry with the same identifier and same payload returns the stored completed result; a different payload with the same identifier receives HTTP 409.
 
 ## Failure behavior
 
@@ -25,7 +25,7 @@ The permanent keys need an approved retention/reconciliation policy. Do not dele
 
 ## Operator reconciliation
 
-1. Find the event by the SHA-256 fingerprint in structured logs and the Redis key `issuer:webhook:auth:<sha256(ISSUER_ID + NUL + authId)>`; never place raw provider secrets or full cardholder data in logs.
+1. Find the event by the SHA-256 fingerprint in structured logs and the Redis key `issuer:webhook:{ISSUER_ID}:auth:<sha256(ISSUER_ID + NUL + authId)>`; never place raw provider secrets or full cardholder data in logs.
 2. Verify the provider's authoritative authorization status and downstream liquidity ledger.
 3. If the record is `processing`, reconcile the downstream side effect before any manual state change.
 4. Preserve an audit trail of the operator, evidence, decision, and timestamp.
