@@ -192,7 +192,7 @@ export const buildApp = (deps: Deps = {}) => {
       .update(JSON.stringify(parsed.data))
       .digest('hex');
     const authEventFingerprint = createHash('sha256')
-      .update(`${issuerIdentity}\\u0000${parsed.data.authId}`)
+      .update(`${issuerIdentity}\u0000${parsed.data.authId}`)
       .digest('hex');
     const authEventKey = `issuer:webhook:auth:${authEventFingerprint}`;
     let authEventClaim: string | null;
