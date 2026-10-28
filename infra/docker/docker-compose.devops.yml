@@ -11,9 +11,15 @@ services:
     environment:
       NODE_ENV: production
       PORT: 8080
+      REDIS_URL: redis://redis:6379
+      # Empty values keep issuer webhook admission closed until an operator provisions them.
+      ISSUER_ID: ${ISSUER_ID:-}
+      ISSUER_WEBHOOK_SECRET: ${ISSUER_WEBHOOK_SECRET:-}
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_started
 
   wallet-service:
     image: ghcr.io/example/zwallet-wallet-service:${IMAGE_TAG:-latest}
@@ -56,6 +62,15 @@ services:
 
   redis:
     image: redis:7-alpine
+    # Local/compose evidence only; production must independently verify HA, backups and restore.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   nats:
     image: nats:2.11-alpine
@@ -99,3 +114,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
