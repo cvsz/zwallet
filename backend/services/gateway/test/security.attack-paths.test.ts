@@ -387,4 +387,57 @@ describe('security attack paths', () => {
     }
   });
 
+
+  it('fails closed when the stable issuer identity is not configured', async () => {
+    const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    const previousIssuerId = process.env.ISSUER_ID;
+    const previousJwtSecret = process.env.JWT_SECRET;
+    const secret = 'synthetic-issuer-webhook-secret-2026';
+    process.env.ISSUER_WEBHOOK_SECRET = secret;
+    delete process.env.ISSUER_ID;
+    process.env.JWT_SECRET = 'test-secret';
+    const redis = fakeRedis();
+    const handleAuth = vi.spyOn(CardOrchestrator.prototype, 'handleAuth').mockResolvedValue({ decision: 'approve' });
+    const app = buildApp({ rateLimiter: redis as any, cache: redis as any });
+    const payload = {
+      userId: '00000000-0000-4000-8000-000000000003',
+      cardId: 'card-987654',
+      amount: 1,
+      currency: 'USD',
+      mcc: '123',
+      merchant: 'Test Merchant',
+      authId: 'auth-no-issuer-789',
+    };
+    const nonce = 'issuer-no-identity-nonce';
+    const signature = createHmac('sha256', secret)
+      .update(`${nonce}.${JSON.stringify(payload)}`)
+      .digest('hex');
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/webhooks/issuer/auth',
+        headers: {
+          'x-nonce': 'global-issuer-identity-missing',
+          'x-issuer-nonce': nonce,
+          'x-issuer-signature': signature,
+          'content-type': 'application/json',
+        },
+        payload: payload,
+      });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toEqual({ error: 'issuer_auth_idempotency_unavailable' });
+      expect(handleAuth).not.toHaveBeenCalled();
+    } finally {
+      handleAuth.mockRestore();
+      await app.close();
+      if (previousIssuerId === undefined) delete process.env.ISSUER_ID;
+      else process.env.ISSUER_ID = previousIssuerId;
+      if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
+      else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
+      if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
+      else process.env.JWT_SECRET = previousJwtSecret;
+    }
+  });
+
 });
