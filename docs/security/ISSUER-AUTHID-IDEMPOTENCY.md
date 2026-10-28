@@ -19,7 +19,7 @@ The operator must provision a stable non-secret `ISSUER_ID` (1–128 ASCII lette
 
 ## Important production limitation
 
-This is a gateway-level deduplication guard, not proof of durable financial idempotency. The Compose profile now enables Redis AOF with `appendfsync always` and a persistent local volume for development/validation only; that is not HA and is not evidence of a production restore. Redis persistence, replication/failover behavior, backup/restore, and recovery from a lost Redis dataset must be verified. The current service does not yet have a database-backed issuer-event ledger or a provider/downstream idempotency contract. Do not admit real issuer traffic until those controls and crash-recovery drills are complete.
+This is a gateway-level deduplication guard, not proof of durable financial idempotency. The Compose profile now enables Redis AOF with `appendfsync always` and a persistent local volume for development/validation only; it also requires `POSTGRES_PASSWORD` from the environment instead of a committed default. This is not HA and is not evidence of a production restore. Redis persistence, replication/failover behavior, backup/restore, and recovery from a lost Redis dataset must be verified. The current service does not yet have a database-backed issuer-event ledger or a provider/downstream idempotency contract. Do not admit real issuer traffic until those controls and crash-recovery drills are complete.
 
 The permanent keys need an approved retention/reconciliation policy. Do not delete a key while the issuer can replay that authorization or while its outcome is unresolved. Retention automation must be designed and reviewed separately; adding an arbitrary TTL can re-enable duplicate pre-funding.
 
