@@ -16,6 +16,20 @@ export const fakeRedis = () => {
       map.set(k, v);
       return 'OK';
     },
+    eval: async (_script: string, numberOfKeys: number, ...args: Array<string | number>) => {
+      const nonceKey = String(args[0]);
+      const authEventKey = String(args[1]);
+      const processingRecord = String(args[numberOfKeys + 1]);
+      if (map.has(nonceKey)) return [0, 'replay'];
+      const existing = map.get(authEventKey);
+      if (existing !== undefined) {
+        map.set(nonceKey, '1');
+        return [2, existing];
+      }
+      map.set(authEventKey, processingRecord);
+      map.set(nonceKey, '1');
+      return [1, 'OK'];
+    },
     setex: async (k: string, _s: number, v: string) => { map.set(k, v); return 'OK'; },
     incr: async (k: string) => { const n = (counter.get(k) ?? 0) + 1; counter.set(k, n); return n; },
     expire: async () => 1,
