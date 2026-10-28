@@ -184,10 +184,17 @@ export const buildApp = (deps: Deps = {}) => {
     // when the provider retries the same authorization with a fresh nonce.
     // The event record intentionally has no TTL: expiring it could permit a second
     // pre-fund. Redis persistence/restore must be verified before production use.
+    const issuerIdentity = process.env.ISSUER_ID;
+    if (!issuerIdentity || issuerIdentity !== issuerIdentity.trim() || !/^[A-Za-z0-9._:-]{1,128}$/.test(issuerIdentity)) {
+      return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+    }
     const authEventPayloadHash = createHash('sha256')
       .update(JSON.stringify(parsed.data))
       .digest('hex');
-    const authEventKey = `issuer:webhook:auth:${createHash('sha256').update(parsed.data.authId).digest('hex')}`;
+    const authEventFingerprint = createHash('sha256')
+      .update(`${issuerIdentity}\\u0000${parsed.data.authId}`)
+      .digest('hex');
+    const authEventKey = `issuer:webhook:auth:${authEventFingerprint}`;
     let authEventClaim: string | null;
     try {
       authEventClaim = await cache.set(
