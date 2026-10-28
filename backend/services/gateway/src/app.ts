@@ -207,18 +207,22 @@ export const buildApp = (deps: Deps = {}) => {
     }
 
     if (authEventClaim === null) {
-      let existing: { status?: unknown; payloadHash?: unknown; result?: unknown };
+      let existing: { status?: unknown; payloadHash?: unknown; result?: unknown } | null;
       try {
         const stored = await cache.get(authEventKey);
         if (!stored) return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
-        existing = JSON.parse(stored) as typeof existing;
+        const decoded: unknown = JSON.parse(stored);
+        if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
+          return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+        }
+        existing = decoded as { status?: unknown; payloadHash?: unknown; result?: unknown };
       } catch {
         return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
       }
-      if (existing.payloadHash !== authEventPayloadHash) {
+      if (!existing || existing.payloadHash !== authEventPayloadHash) {
         return reply.code(409).send({ error: 'issuer_auth_id_conflict' });
       }
-      if (existing.status === 'completed' && existing.result && typeof existing.result === 'object') {
+      if (existing.status === 'completed' && existing.result && typeof existing.result === 'object' && !Array.isArray(existing.result)) {
         return reply.code(200).send(existing.result);
       }
       if (existing.status === 'processing') {
