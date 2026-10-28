@@ -253,6 +253,76 @@ describe('security attack paths', () => {
   });
 
 
+  it('does not consume an issuer nonce when ISSUER_ID is missing or invalid', async () => {
+    const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    const previousIssuerId = process.env.ISSUER_ID;
+    const previousJwtSecret = process.env.JWT_SECRET;
+    const secret = 'synthetic-issuer-webhook-secret-2026';
+    const nonce = 'issuer-nonce-identity-config-retry';
+    process.env.ISSUER_WEBHOOK_SECRET = secret;
+    delete process.env.ISSUER_ID;
+    process.env.JWT_SECRET = 'test-secret';
+    const redis = fakeRedis();
+    const handleAuth = vi.spyOn(CardOrchestrator.prototype, 'handleAuth').mockResolvedValue({ decision: 'approve' });
+    const app = buildApp({ rateLimiter: redis as any, cache: redis as any });
+    const payload = {
+      userId: '00000000-0000-4000-8000-000000000001',
+      cardId: 'card-123456',
+      amount: 1,
+      currency: 'USD',
+      mcc: '123',
+      merchant: 'Test Merchant',
+      authId: 'auth-identity-config-retry',
+    };
+    const nonceKey = `issuer:webhook:nonce:${nonce}`;
+    const sendWebhook = (globalNonce: string) => {
+      const signature = createHmac('sha256', secret)
+        .update(`${nonce}.${JSON.stringify(payload)}`)
+        .digest('hex');
+      return app.inject({
+        method: 'POST',
+        url: '/v1/webhooks/issuer/auth',
+        headers: {
+          'x-nonce': globalNonce,
+          'x-issuer-nonce': nonce,
+          'x-issuer-signature': signature,
+          'content-type': 'application/json',
+        },
+        payload,
+      });
+    };
+
+    try {
+      for (const [index, issuerId] of [undefined, ' invalid-issuer', 'issuer/invalid'].entries()) {
+        if (issuerId === undefined) delete process.env.ISSUER_ID;
+        else process.env.ISSUER_ID = issuerId;
+
+        const response = await sendWebhook(`global-issuer-identity-invalid-${index}`);
+        expect(response.statusCode).toBe(503);
+        expect(response.json()).toEqual({ error: 'issuer_auth_idempotency_unavailable' });
+        expect(await redis.get(nonceKey)).toBeNull();
+      }
+      expect(handleAuth).not.toHaveBeenCalled();
+
+      process.env.ISSUER_ID = 'test-issuer';
+      const retry = await sendWebhook('global-issuer-identity-valid-retry');
+      expect(retry.statusCode).toBe(200);
+      expect(retry.json()).toEqual({ decision: 'approve' });
+      expect(await redis.get(nonceKey)).toBe('1');
+      expect(handleAuth).toHaveBeenCalledTimes(1);
+      expect(handleAuth).toHaveBeenCalledWith(payload);
+    } finally {
+      handleAuth.mockRestore();
+      await app.close();
+      if (previousIssuerId === undefined) delete process.env.ISSUER_ID;
+      else process.env.ISSUER_ID = previousIssuerId;
+      if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
+      else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
+      if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
+      else process.env.JWT_SECRET = previousJwtSecret;
+    }
+  });
+
   it('deduplicates issuer authId across fresh nonces and rejects payload conflicts', async () => {
     const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
     const previousIssuerId = process.env.ISSUER_ID;
