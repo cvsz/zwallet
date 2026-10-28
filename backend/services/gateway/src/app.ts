@@ -32,7 +32,7 @@ const CLAIM_ISSUER_AUTH_EVENT_LUA = [
   "  return {0, 'replay'}",
   "end",
   "return {1, 'OK'}",
-].join('\\n');\n\ntype Deps = {
+].join('\n');\n\ntype Deps = {
   rateLimiter?: { incr: (k: string) => Promise<number>; expire: (k: string, s: number) => Promise<number> };
   cache?: {
     get: (k: string) => Promise<string | null>;
