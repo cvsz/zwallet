@@ -7,7 +7,7 @@ The issuer authentication webhook uses two distinct identifiers:
 - `x-issuer-nonce` protects a signed HTTP delivery from transport replay.
 - `authId` identifies the business authorization event and prevents the same authorization from invoking risk evaluation or liquidity pre-funding again when a provider retries with a fresh nonce.
 
-The gateway atomically claims a hashed `authId` key in Redis with `SET ... NX`. The key contains no raw authorization identifier and has no automatic TTL. The payload fingerprint binds the idempotency record to the validated event. A retry with the same identifier and same payload returns the stored completed result; a different payload with the same identifier receives HTTP 409.
+The operator must provision a stable non-secret `ISSUER_ID` (1–128 ASCII letters, digits, dot, underscore, colon, or hyphen). Missing or malformed identity fails closed with HTTP 503. The gateway atomically claims a hashed `ISSUER_ID + authId` key in Redis with `SET ... NX`. The key contains no raw authorization identifier and has no automatic TTL. The payload fingerprint binds the idempotency record to the validated event. A retry with the same identifier and same payload returns the stored completed result; a different payload with the same identifier receives HTTP 409.
 
 ## Failure behavior
 
