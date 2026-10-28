@@ -440,4 +440,73 @@ describe('security attack paths', () => {
     }
   });
 
+
+  it('keeps an authId locked when the completed result cannot be persisted', async () => {
+    const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    const previousIssuerId = process.env.ISSUER_ID;
+    const previousJwtSecret = process.env.JWT_SECRET;
+    const secret = 'synthetic-issuer-webhook-secret-2026';
+    process.env.ISSUER_WEBHOOK_SECRET = secret;
+    process.env.ISSUER_ID = 'test-issuer';
+    process.env.JWT_SECRET = 'test-secret';
+    const redis = fakeRedis();
+    let setCalls = 0;
+    const cache = {
+      ...redis,
+      set: async (key: string, value: string, mode?: string, duration?: string, condition?: string) => {
+        setCalls += 1;
+        if (setCalls === 3) throw new Error('synthetic result persistence failure');
+        return redis.set(key, value, mode, duration, condition);
+      },
+    };
+    const handleAuth = vi.spyOn(CardOrchestrator.prototype, 'handleAuth').mockResolvedValue({ decision: 'approve' });
+    const app = buildApp({ rateLimiter: redis as any, cache: cache as any });
+    const payload = {
+      userId: '00000000-0000-4000-8000-000000000004',
+      cardId: 'card-111222',
+      amount: 1,
+      currency: 'USD',
+      mcc: '123',
+      merchant: 'Test Merchant',
+      authId: 'auth-result-write-failure-321',
+    };
+    const sendWebhook = (globalNonce: string, issuerNonce: string) => {
+      const signature = createHmac('sha256', secret)
+        .update(`${issuerNonce}.${JSON.stringify(payload)}`)
+        .digest('hex');
+      return app.inject({
+        method: 'POST',
+        url: '/v1/webhooks/issuer/auth',
+        headers: {
+          'x-nonce': globalNonce,
+          'x-issuer-nonce': issuerNonce,
+          'x-issuer-signature': signature,
+          'content-type': 'application/json',
+        },
+        payload,
+      });
+    };
+
+    try {
+      const first = await sendWebhook('global-auth-persist-failure-a', 'issuer-auth-persist-failure-a');
+      expect(first.statusCode).toBe(503);
+      expect(first.json()).toEqual({ error: 'issuer_auth_outcome_unknown' });
+      expect(handleAuth).toHaveBeenCalledTimes(1);
+
+      const retry = await sendWebhook('global-auth-persist-failure-b', 'issuer-auth-persist-failure-b');
+      expect(retry.statusCode).toBe(503);
+      expect(retry.json()).toEqual({ error: 'issuer_auth_in_progress' });
+      expect(handleAuth).toHaveBeenCalledTimes(1);
+    } finally {
+      handleAuth.mockRestore();
+      await app.close();
+      if (previousIssuerId === undefined) delete process.env.ISSUER_ID;
+      else process.env.ISSUER_ID = previousIssuerId;
+      if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
+      else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
+      if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
+      else process.env.JWT_SECRET = previousJwtSecret;
+    }
+  });
+
 });
