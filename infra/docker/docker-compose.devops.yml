@@ -56,7 +56,8 @@ services:
     environment:
       POSTGRES_DB: zwallet
       POSTGRES_USER: zwallet
-      POSTGRES_PASSWORD: zwallet
+      # Do not ship a committed default database password; provide it through the local secret environment.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
