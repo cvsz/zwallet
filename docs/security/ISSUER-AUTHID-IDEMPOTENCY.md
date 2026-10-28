@@ -19,7 +19,7 @@ The operator must provision a stable non-secret `ISSUER_ID` (1–128 ASCII lette
 
 ## Important production limitation
 
-This is a gateway-level deduplication guard, not proof of durable financial idempotency. Redis persistence, replication/failover behavior, backup/restore, and recovery from a lost Redis dataset must be verified. The current service does not yet have a database-backed issuer-event ledger or a provider/downstream idempotency contract. Do not admit real issuer traffic until those controls and crash-recovery drills are complete.
+This is a gateway-level deduplication guard, not proof of durable financial idempotency. The Compose profile now enables Redis AOF with `appendfsync always` and a persistent local volume for development/validation only; that is not HA and is not evidence of a production restore. Redis persistence, replication/failover behavior, backup/restore, and recovery from a lost Redis dataset must be verified. The current service does not yet have a database-backed issuer-event ledger or a provider/downstream idempotency contract. Do not admit real issuer traffic until those controls and crash-recovery drills are complete.
 
 The permanent keys need an approved retention/reconciliation policy. Do not delete a key while the issuer can replay that authorization or while its outcome is unresolved. Retention automation must be designed and reviewed separately; adding an arbitrary TTL can re-enable duplicate pre-funding.
 
@@ -30,6 +30,12 @@ The permanent keys need an approved retention/reconciliation policy. Do not dele
 3. If the record is `processing`, reconcile the downstream side effect before any manual state change.
 4. Preserve an audit trail of the operator, evidence, decision, and timestamp.
 5. Do not reset the record to permit processing unless the issuer and downstream owners establish that no side effect occurred.
+
+## Deployment configuration
+
+- Kubernetes requires `zwallet-secrets/redis_url` for the shared Redis endpoint; it must not use the pod-local `localhost` default.
+- `ISSUER_ID` is read from optional ConfigMap key `zwallet-config/issuer_id`; `ISSUER_WEBHOOK_SECRET` is read from optional Secret key `zwallet-secrets/issuer_webhook_secret`. Missing issuer configuration intentionally leaves this webhook unavailable.
+- Provision values through the approved secret/configuration manager. Do not commit live values or apply the manifest to production until the target cluster's Secret/ConfigMap references and Redis durability settings have been read back.
 
 ## Required release evidence
 
