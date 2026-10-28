@@ -14,12 +14,31 @@ import { OfframpService } from './services/liquidity/offramp-service.js';
 import { CardOrchestrator } from './services/card/card-orchestrator.js';
 import { KycService } from './services/compliance/kyc-service.js';
 
-type Deps = {
+const CLAIM_ISSUER_AUTH_EVENT_LUA = [
+  "if redis.call('EXISTS', KEYS[1]) == 1 then",
+  "  return {0, 'replay'}",
+  "end",
+  "local existing = redis.call('GET', KEYS[2])",
+  "if existing then",
+  "  local nonceClaim = redis.call('SET', KEYS[1], '1', 'EX', ARGV[1], 'NX')",
+  "  if not nonceClaim then return {0, 'replay'} end",
+  "  return {2, existing}",
+  "end",
+  "local eventClaim = redis.call('SET', KEYS[2], ARGV[2], 'NX')",
+  "if not eventClaim then return {2, redis.call('GET', KEYS[2]) or ''} end",
+  "local nonceClaim = redis.call('SET', KEYS[1], '1', 'EX', ARGV[1], 'NX')",
+  "if not nonceClaim then",
+  "  redis.call('DEL', KEYS[2])",
+  "  return {0, 'replay'}",
+  "end",
+  "return {1, 'OK'}",
+].join('\\n');\n\ntype Deps = {
   rateLimiter?: { incr: (k: string) => Promise<number>; expire: (k: string, s: number) => Promise<number> };
   cache?: {
     get: (k: string) => Promise<string | null>;
     setex: (k: string, s: number, v: string) => Promise<unknown>;
     set?: (k: string, v: string, ...args: string[]) => Promise<string | null>;
+    eval?: (script: string, numberOfKeys: number, ...args: Array<string | number>) => Promise<unknown>;
   };
 };
 
@@ -172,49 +191,51 @@ export const buildApp = (deps: Deps = {}) => {
       return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
     }
 
-    const nonceKey = `issuer:webhook:nonce:${String(nonce)}`;
-    if (typeof cache.set !== 'function') {
-      return reply.code(503).send({ error: 'webhook_replay_protection_unavailable' });
-    }
-    let nonceClaim: string | null;
-    try {
-      nonceClaim = await cache.set(nonceKey, '1', 'EX', '300', 'NX');
-    } catch {
-      return reply.code(503).send({ error: 'webhook_replay_protection_unavailable' });
-    }
-    if (nonceClaim === null) return reply.code(409).send({ error: 'replay_detected' });
-    if (nonceClaim !== 'OK') {
-      return reply.code(503).send({ error: 'webhook_replay_protection_unavailable' });
-    }
-
-    // A provider nonce protects transport replay; authId protects the business event
-    // when the provider retries the same authorization with a fresh nonce.
-    // The event record intentionally has no TTL: expiring it could permit a second
-    // pre-fund. Redis persistence/restore must be verified before production use.
+    // The shared hash tag keeps both keys in one Redis Cluster slot for the Lua transaction.
+    const issuerKeyTag = '{' + issuerIdentity + '}';
+    const nonceKey = 'issuer:webhook:' + issuerKeyTag + ':nonce:' + String(nonce);
     const authEventPayloadHash = createHash('sha256')
       .update(JSON.stringify(parsed.data))
       .digest('hex');
     const authEventFingerprint = createHash('sha256')
-      .update(`${issuerIdentity}\u0000${parsed.data.authId}`)
+      .update(issuerIdentity + '\u0000' + parsed.data.authId)
       .digest('hex');
-    const authEventKey = `issuer:webhook:auth:${authEventFingerprint}`;
-    let authEventClaim: string | null;
+    const authEventKey = 'issuer:webhook:' + issuerKeyTag + ':auth:' + authEventFingerprint;
+    const processingRecord = JSON.stringify({
+      status: 'processing',
+      payloadHash: authEventPayloadHash,
+      startedAt: new Date().toISOString(),
+    });
+
+    if (typeof cache.eval !== 'function') {
+      return reply.code(503).send({ error: 'webhook_replay_protection_unavailable' });
+    }
+
+    let claim: unknown;
     try {
-      authEventClaim = await cache.set(
+      claim = await cache.eval(
+        CLAIM_ISSUER_AUTH_EVENT_LUA,
+        2,
+        nonceKey,
         authEventKey,
-        JSON.stringify({ status: 'processing', payloadHash: authEventPayloadHash, startedAt: new Date().toISOString() }),
-        'NX',
+        '300',
+        processingRecord,
       );
     } catch {
       return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
     }
 
-    if (authEventClaim === null) {
-      let existing: { status?: unknown; payloadHash?: unknown; result?: unknown } | null;
+    if (!Array.isArray(claim) || claim.length !== 2) {
+      return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+    }
+    const claimCode = Number(claim[0]);
+    const claimValue = typeof claim[1] === 'string' ? claim[1] : '';
+    if (claimCode === 0) return reply.code(409).send({ error: 'replay_detected' });
+
+    if (claimCode === 2) {
+      let existing: { status?: unknown; payloadHash?: unknown; result?: unknown };
       try {
-        const stored = await cache.get(authEventKey);
-        if (!stored) return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
-        const decoded: unknown = JSON.parse(stored);
+        const decoded: unknown = JSON.parse(claimValue);
         if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
           return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
         }
@@ -222,7 +243,7 @@ export const buildApp = (deps: Deps = {}) => {
       } catch {
         return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
       }
-      if (!existing || existing.payloadHash !== authEventPayloadHash) {
+      if (existing.payloadHash !== authEventPayloadHash) {
         return reply.code(409).send({ error: 'issuer_auth_id_conflict' });
       }
       if (existing.status === 'completed' && existing.result && typeof existing.result === 'object' && !Array.isArray(existing.result)) {
@@ -233,7 +254,8 @@ export const buildApp = (deps: Deps = {}) => {
       }
       return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
     }
-    if (authEventClaim !== 'OK') {
+
+    if (claimCode !== 1 || claimValue !== 'OK') {
       return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
     }
 
