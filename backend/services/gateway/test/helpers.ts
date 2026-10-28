@@ -9,7 +9,8 @@ export const fakeRedis = () => {
   return {
     get: async (k: string) => map.get(k) ?? counter.get(k)?.toString() ?? null,
     set: async (k: string, v: string, mode?: string, duration?: string, condition?: string) => {
-      if (condition === 'NX' && (map.has(k) || counter.has(k) || hashes.has(k) || lists.has(k))) {
+      const onlyIfAbsent = mode === 'NX' || condition === 'NX';
+      if (onlyIfAbsent && (map.has(k) || counter.has(k) || hashes.has(k) || lists.has(k))) {
         return null;
       }
       map.set(k, v);
