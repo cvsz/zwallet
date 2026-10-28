@@ -149,10 +149,12 @@ describe('security attack paths', () => {
   });
   it('atomically rejects concurrent replays of a signed issuer webhook nonce', async () => {
     const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    const previousIssuerId = process.env.ISSUER_ID;
     const previousJwtSecret = process.env.JWT_SECRET;
     const secret = 'synthetic-issuer-webhook-secret-2026';
     const nonce = 'issuer-nonce-concurrent-1';
     process.env.ISSUER_WEBHOOK_SECRET = secret;
+    process.env.ISSUER_ID = 'test-issuer';
     process.env.JWT_SECRET = 'test-secret';
     const redis = fakeRedis();
     const handleAuth = vi.spyOn(CardOrchestrator.prototype, 'handleAuth').mockResolvedValue({ decision: 'approve' });
@@ -195,6 +197,8 @@ describe('security attack paths', () => {
     } finally {
       handleAuth.mockRestore();
       await app.close();
+      if (previousIssuerId === undefined) delete process.env.ISSUER_ID;
+      else process.env.ISSUER_ID = previousIssuerId;
       if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
       else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
       if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
@@ -251,9 +255,11 @@ describe('security attack paths', () => {
 
   it('deduplicates issuer authId across fresh nonces and rejects payload conflicts', async () => {
     const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    const previousIssuerId = process.env.ISSUER_ID;
     const previousJwtSecret = process.env.JWT_SECRET;
     const secret = 'synthetic-issuer-webhook-secret-2026';
     process.env.ISSUER_WEBHOOK_SECRET = secret;
+    process.env.ISSUER_ID = 'test-issuer';
     process.env.JWT_SECRET = 'test-secret';
     const redis = fakeRedis();
     const handleAuth = vi.spyOn(CardOrchestrator.prototype, 'handleAuth').mockResolvedValue({ decision: 'approve' });
@@ -304,6 +310,8 @@ describe('security attack paths', () => {
     } finally {
       handleAuth.mockRestore();
       await app.close();
+      if (previousIssuerId === undefined) delete process.env.ISSUER_ID;
+      else process.env.ISSUER_ID = previousIssuerId;
       if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
       else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
       if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
@@ -313,9 +321,11 @@ describe('security attack paths', () => {
 
   it('fails closed for concurrent deliveries while an authId result is unresolved', async () => {
     const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    const previousIssuerId = process.env.ISSUER_ID;
     const previousJwtSecret = process.env.JWT_SECRET;
     const secret = 'synthetic-issuer-webhook-secret-2026';
     process.env.ISSUER_WEBHOOK_SECRET = secret;
+    process.env.ISSUER_ID = 'test-issuer';
     process.env.JWT_SECRET = 'test-secret';
     const redis = fakeRedis();
     let releaseHandler: ((value: { decision: string }) => void) | undefined;
@@ -368,6 +378,8 @@ describe('security attack paths', () => {
       releaseHandler?.({ decision: 'approve' });
       handleAuth.mockRestore();
       await app.close();
+      if (previousIssuerId === undefined) delete process.env.ISSUER_ID;
+      else process.env.ISSUER_ID = previousIssuerId;
       if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
       else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
       if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
