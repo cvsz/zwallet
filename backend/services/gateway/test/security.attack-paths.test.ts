@@ -248,4 +248,131 @@ describe('security attack paths', () => {
     }
   });
 
+
+  it('deduplicates issuer authId across fresh nonces and rejects payload conflicts', async () => {
+    const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    const previousJwtSecret = process.env.JWT_SECRET;
+    const secret = 'synthetic-issuer-webhook-secret-2026';
+    process.env.ISSUER_WEBHOOK_SECRET = secret;
+    process.env.JWT_SECRET = 'test-secret';
+    const redis = fakeRedis();
+    const handleAuth = vi.spyOn(CardOrchestrator.prototype, 'handleAuth').mockResolvedValue({ decision: 'approve' });
+    const app = buildApp({ rateLimiter: redis as any, cache: redis as any });
+    const payload = {
+      userId: '00000000-0000-4000-8000-000000000001',
+      cardId: 'card-123456',
+      amount: 1,
+      currency: 'USD',
+      mcc: '123',
+      merchant: 'Test Merchant',
+      authId: 'auth-stable-id-123',
+    };
+    const sendWebhook = (globalNonce: string, issuerNonce: string, body = payload) => {
+      const signature = createHmac('sha256', secret)
+        .update(`${issuerNonce}.${JSON.stringify(body)}`)
+        .digest('hex');
+      return app.inject({
+        method: 'POST',
+        url: '/v1/webhooks/issuer/auth',
+        headers: {
+          'x-nonce': globalNonce,
+          'x-issuer-nonce': issuerNonce,
+          'x-issuer-signature': signature,
+          'content-type': 'application/json',
+        },
+        payload: body,
+      });
+    };
+
+    try {
+      const first = await sendWebhook('global-auth-id-first', 'issuer-auth-id-nonce-a');
+      const duplicate = await sendWebhook('global-auth-id-second', 'issuer-auth-id-nonce-b');
+      expect(first.statusCode).toBe(200);
+      expect(first.json()).toEqual({ decision: 'approve' });
+      expect(duplicate.statusCode).toBe(200);
+      expect(duplicate.json()).toEqual(first.json());
+      expect(handleAuth).toHaveBeenCalledTimes(1);
+
+      const conflicting = await sendWebhook(
+        'global-auth-id-conflict',
+        'issuer-auth-id-nonce-c',
+        { ...payload, amount: 2 },
+      );
+      expect(conflicting.statusCode).toBe(409);
+      expect(conflicting.json()).toEqual({ error: 'issuer_auth_id_conflict' });
+      expect(handleAuth).toHaveBeenCalledTimes(1);
+    } finally {
+      handleAuth.mockRestore();
+      await app.close();
+      if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
+      else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
+      if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
+      else process.env.JWT_SECRET = previousJwtSecret;
+    }
+  });
+
+  it('fails closed for concurrent deliveries while an authId result is unresolved', async () => {
+    const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    const previousJwtSecret = process.env.JWT_SECRET;
+    const secret = 'synthetic-issuer-webhook-secret-2026';
+    process.env.ISSUER_WEBHOOK_SECRET = secret;
+    process.env.JWT_SECRET = 'test-secret';
+    const redis = fakeRedis();
+    let releaseHandler: ((value: { decision: string }) => void) | undefined;
+    const pendingResult = new Promise<{ decision: string }>((resolve) => { releaseHandler = resolve; });
+    const handleAuth = vi.spyOn(CardOrchestrator.prototype, 'handleAuth').mockReturnValue(pendingResult as any);
+    const app = buildApp({ rateLimiter: redis as any, cache: redis as any });
+    const payload = {
+      userId: '00000000-0000-4000-8000-000000000002',
+      cardId: 'card-654321',
+      amount: 1,
+      currency: 'USD',
+      mcc: '123',
+      merchant: 'Test Merchant',
+      authId: 'auth-inflight-id-456',
+    };
+    const sendWebhook = (globalNonce: string, issuerNonce: string) => {
+      const signature = createHmac('sha256', secret)
+        .update(`${issuerNonce}.${JSON.stringify(payload)}`)
+        .digest('hex');
+      return app.inject({
+        method: 'POST',
+        url: '/v1/webhooks/issuer/auth',
+        headers: {
+          'x-nonce': globalNonce,
+          'x-issuer-nonce': issuerNonce,
+          'x-issuer-signature': signature,
+          'content-type': 'application/json',
+        },
+        payload,
+      });
+    };
+
+    try {
+      const firstPromise = sendWebhook('global-auth-inflight-first', 'issuer-auth-inflight-a');
+      await vi.waitFor(() => expect(handleAuth).toHaveBeenCalledTimes(1));
+      const duplicate = await sendWebhook('global-auth-inflight-second', 'issuer-auth-inflight-b');
+      expect(duplicate.statusCode).toBe(503);
+      expect(duplicate.json()).toEqual({ error: 'issuer_auth_in_progress' });
+      expect(duplicate.headers['retry-after']).toBe('5');
+      expect(handleAuth).toHaveBeenCalledTimes(1);
+
+      releaseHandler?.({ decision: 'approve' });
+      const first = await firstPromise;
+      expect(first.statusCode).toBe(200);
+      const retry = await sendWebhook('global-auth-inflight-third', 'issuer-auth-inflight-c');
+      expect(retry.statusCode).toBe(200);
+      expect(retry.json()).toEqual({ decision: 'approve' });
+      expect(handleAuth).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseHandler?.({ decision: 'approve' });
+      handleAuth.mockRestore();
+      await app.close();
+      if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
+      else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
+      if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
+      else process.env.JWT_SECRET = previousJwtSecret;
+    }
+  });
+
 });
