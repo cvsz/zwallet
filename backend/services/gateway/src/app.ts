@@ -236,7 +236,7 @@ export const buildApp = (deps: Deps = {}) => {
     } catch {
       // The handler may have completed a downstream side effect before failing.
       // Keep the processing claim and require reconciliation; never auto-replay it.
-      app.log.error({ event: 'issuer_auth_outcome_unknown', authEventFingerprint: authEventPayloadHash });
+      app.log.error({ event: 'issuer_auth_outcome_unknown', authEventFingerprint });
       return reply.code(503).send({ error: 'issuer_auth_outcome_unknown' });
     }
 
@@ -248,7 +248,7 @@ export const buildApp = (deps: Deps = {}) => {
       if (saved !== 'OK') throw new Error('issuer_auth_result_not_persisted');
     } catch {
       // Leave the original processing claim in place if result persistence fails.
-      app.log.error({ event: 'issuer_auth_result_persistence_failed', authEventFingerprint: authEventPayloadHash });
+      app.log.error({ event: 'issuer_auth_result_persistence_failed', authEventFingerprint });
       return reply.code(503).send({ error: 'issuer_auth_outcome_unknown' });
     }
 
