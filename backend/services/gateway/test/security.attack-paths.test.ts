@@ -193,7 +193,7 @@ describe('security attack paths', () => {
       expect(accepted?.json()).toEqual({ decision: 'approve' });
       expect(handleAuth).toHaveBeenCalledTimes(1);
       expect(handleAuth).toHaveBeenCalledWith(payload);
-      expect(await redis.get(`issuer:webhook:nonce:${nonce}`)).toBe('1');
+      expect(await redis.get('issuer:webhook:{test-issuer}:nonce:' + nonce)).toBe('1');
     } finally {
       handleAuth.mockRestore();
       await app.close();
@@ -208,10 +208,12 @@ describe('security attack paths', () => {
 
   it('fails closed when the replay cache cannot atomically claim a nonce', async () => {
     const previousWebhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    const previousIssuerId = process.env.ISSUER_ID;
     const previousJwtSecret = process.env.JWT_SECRET;
     const secret = 'synthetic-issuer-webhook-secret-2026';
     const nonce = 'issuer-nonce-no-atomic-cache';
     process.env.ISSUER_WEBHOOK_SECRET = secret;
+    process.env.ISSUER_ID = 'test-issuer';
     process.env.JWT_SECRET = 'test-secret';
     const redis = fakeRedis();
     const cacheWithoutAtomicClaim = { get: redis.get, setex: redis.setex };
@@ -245,6 +247,8 @@ describe('security attack paths', () => {
       expect(response.json()).toEqual({ error: 'webhook_replay_protection_unavailable' });
     } finally {
       await app.close();
+      if (previousIssuerId === undefined) delete process.env.ISSUER_ID;
+      else process.env.ISSUER_ID = previousIssuerId;
       if (previousWebhookSecret === undefined) delete process.env.ISSUER_WEBHOOK_SECRET;
       else process.env.ISSUER_WEBHOOK_SECRET = previousWebhookSecret;
       if (previousJwtSecret === undefined) delete process.env.JWT_SECRET;
@@ -274,7 +278,7 @@ describe('security attack paths', () => {
       merchant: 'Test Merchant',
       authId: 'auth-identity-config-retry',
     };
-    const nonceKey = `issuer:webhook:nonce:${nonce}`;
+    const nonceKey = 'issuer:webhook:{test-issuer}:nonce:' + nonce;
     const sendWebhook = (globalNonce: string) => {
       const signature = createHmac('sha256', secret)
         .update(`${nonce}.${JSON.stringify(payload)}`)
