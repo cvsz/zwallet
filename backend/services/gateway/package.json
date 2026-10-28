@@ -9,7 +9,7 @@
     "test": "vitest run && node --test test/legacy-password-inventory.node.mjs",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
-    "lint": "echo lint-gateway"
+    "lint": "eslint --ext .ts src test"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
