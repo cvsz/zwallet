@@ -165,6 +165,13 @@ export const buildApp = (deps: Deps = {}) => {
     const parsed = issuerAuthWebhookSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
+    // Validate stable issuer identity before consuming the transport nonce.
+    // Otherwise a configuration error would lock out a legitimate provider retry.
+    const issuerIdentity = process.env.ISSUER_ID;
+    if (!issuerIdentity || issuerIdentity !== issuerIdentity.trim() || !/^[A-Za-z0-9._:-]{1,128}$/.test(issuerIdentity)) {
+      return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+    }
+
     const nonceKey = `issuer:webhook:nonce:${String(nonce)}`;
     if (typeof cache.set !== 'function') {
       return reply.code(503).send({ error: 'webhook_replay_protection_unavailable' });
@@ -184,10 +191,6 @@ export const buildApp = (deps: Deps = {}) => {
     // when the provider retries the same authorization with a fresh nonce.
     // The event record intentionally has no TTL: expiring it could permit a second
     // pre-fund. Redis persistence/restore must be verified before production use.
-    const issuerIdentity = process.env.ISSUER_ID;
-    if (!issuerIdentity || issuerIdentity !== issuerIdentity.trim() || !/^[A-Za-z0-9._:-]{1,128}$/.test(issuerIdentity)) {
-      return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
-    }
     const authEventPayloadHash = createHash('sha256')
       .update(JSON.stringify(parsed.data))
       .digest('hex');
