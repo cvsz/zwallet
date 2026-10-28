@@ -25,6 +25,26 @@ spec:
                 secretKeyRef:
                   name: zwallet-secrets
                   key: db_url
+            # Required shared Redis endpoint; do not fall back to pod-local localhost.
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: zwallet-secrets
+                  key: redis_url
+            # These optional references keep the rest of the gateway available while
+            # issuer webhook admission remains fail-closed until operators provision them.
+            - name: ISSUER_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: zwallet-config
+                  key: issuer_id
+                  optional: true
+            - name: ISSUER_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: zwallet-secrets
+                  key: issuer_webhook_secret
+                  optional: true
           readinessProbe:
             httpGet:
               path: /health

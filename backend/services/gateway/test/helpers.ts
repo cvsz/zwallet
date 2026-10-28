@@ -8,18 +8,27 @@ export const fakeRedis = () => {
 
   return {
     get: async (k: string) => map.get(k) ?? counter.get(k)?.toString() ?? null,
-    set: async (k: string, v: string, mode?: string, duration?: string) => {
-      if (mode === 'EX' || mode === 'PX') {
-        // Simple mock: if it exists, it's a "lock failure" for some patterns,
-        // but here withIdempotency uses set(key, '1', 'EX', ttl) as a lock.
-        // In ioredis, set(k, v, 'EX', t, 'NX') returns 'OK' or null.
-        // The current state-store uses set(k, '1', 'EX', ttl) without NX.
-        // Actually line 28 in state-store.ts: await this.redis.set(`idem:${key}:lock`, '1', 'EX', String(ttlSec));
-        // It doesn't use NX! So it always succeeds unless it's a different implementation.
-        // Wait, if it doesn't use NX, it's not a lock.
+    set: async (k: string, v: string, mode?: string, duration?: string, condition?: string) => {
+      const onlyIfAbsent = mode === 'NX' || condition === 'NX';
+      if (onlyIfAbsent && (map.has(k) || counter.has(k) || hashes.has(k) || lists.has(k))) {
+        return null;
       }
       map.set(k, v);
       return 'OK';
+    },
+    eval: async (_script: string, numberOfKeys: number, ...args: Array<string | number>) => {
+      const nonceKey = String(args[0]);
+      const authEventKey = String(args[1]);
+      const processingRecord = String(args[numberOfKeys + 1]);
+      if (map.has(nonceKey)) return [0, 'replay'];
+      const existing = map.get(authEventKey);
+      if (existing !== undefined) {
+        map.set(nonceKey, '1');
+        return [2, existing];
+      }
+      map.set(authEventKey, processingRecord);
+      map.set(nonceKey, '1');
+      return [1, 'OK'];
     },
     setex: async (k: string, _s: number, v: string) => { map.set(k, v); return 'OK'; },
     incr: async (k: string) => { const n = (counter.get(k) ?? 0) + 1; counter.set(k, n); return n; },
