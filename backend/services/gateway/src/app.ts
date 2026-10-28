@@ -19,7 +19,7 @@ type Deps = {
   cache?: {
     get: (k: string) => Promise<string | null>;
     setex: (k: string, s: number, v: string) => Promise<unknown>;
-    set?: (k: string, v: string, mode: 'EX', seconds: string, condition: 'NX') => Promise<string | null>;
+    set?: (k: string, v: string, ...args: string[]) => Promise<string | null>;
   };
 };
 
@@ -162,6 +162,9 @@ export const buildApp = (deps: Deps = {}) => {
     if (provided.length !== expected.length || !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) {
       return reply.code(401).send({ error: 'invalid_webhook_signature' });
     }
+    const parsed = issuerAuthWebhookSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
     const nonceKey = `issuer:webhook:nonce:${String(nonce)}`;
     if (typeof cache.set !== 'function') {
       return reply.code(503).send({ error: 'webhook_replay_protection_unavailable' });
@@ -176,9 +179,73 @@ export const buildApp = (deps: Deps = {}) => {
     if (nonceClaim !== 'OK') {
       return reply.code(503).send({ error: 'webhook_replay_protection_unavailable' });
     }
-    const parsed = issuerAuthWebhookSchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    return cardOrchestrator.handleAuth(parsed.data);
+
+    // A provider nonce protects transport replay; authId protects the business event
+    // when the provider retries the same authorization with a fresh nonce.
+    // The event record intentionally has no TTL: expiring it could permit a second
+    // pre-fund. Redis persistence/restore must be verified before production use.
+    const authEventPayloadHash = createHash('sha256')
+      .update(JSON.stringify(parsed.data))
+      .digest('hex');
+    const authEventKey = `issuer:webhook:auth:${createHash('sha256').update(parsed.data.authId).digest('hex')}`;
+    let authEventClaim: string | null;
+    try {
+      authEventClaim = await cache.set(
+        authEventKey,
+        JSON.stringify({ status: 'processing', payloadHash: authEventPayloadHash, startedAt: new Date().toISOString() }),
+        'NX',
+      );
+    } catch {
+      return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+    }
+
+    if (authEventClaim === null) {
+      let existing: { status?: unknown; payloadHash?: unknown; result?: unknown };
+      try {
+        const stored = await cache.get(authEventKey);
+        if (!stored) return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+        existing = JSON.parse(stored) as typeof existing;
+      } catch {
+        return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+      }
+      if (existing.payloadHash !== authEventPayloadHash) {
+        return reply.code(409).send({ error: 'issuer_auth_id_conflict' });
+      }
+      if (existing.status === 'completed' && existing.result && typeof existing.result === 'object') {
+        return reply.code(200).send(existing.result);
+      }
+      if (existing.status === 'processing') {
+        return reply.header('retry-after', '5').code(503).send({ error: 'issuer_auth_in_progress' });
+      }
+      return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+    }
+    if (authEventClaim !== 'OK') {
+      return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+    }
+
+    let result: unknown;
+    try {
+      result = await cardOrchestrator.handleAuth(parsed.data);
+    } catch {
+      // The handler may have completed a downstream side effect before failing.
+      // Keep the processing claim and require reconciliation; never auto-replay it.
+      app.log.error({ event: 'issuer_auth_outcome_unknown', authEventFingerprint: authEventPayloadHash });
+      return reply.code(503).send({ error: 'issuer_auth_outcome_unknown' });
+    }
+
+    try {
+      const saved = await cache.set(
+        authEventKey,
+        JSON.stringify({ status: 'completed', payloadHash: authEventPayloadHash, result, completedAt: new Date().toISOString() }),
+      );
+      if (saved !== 'OK') throw new Error('issuer_auth_result_not_persisted');
+    } catch {
+      // Leave the original processing claim in place if result persistence fails.
+      app.log.error({ event: 'issuer_auth_result_persistence_failed', authEventFingerprint: authEventPayloadHash });
+      return reply.code(503).send({ error: 'issuer_auth_outcome_unknown' });
+    }
+
+    return reply.code(200).send(result);
   });
 
   app.post('/v1/card/:id/freeze', { preHandler: [authGuard] }, async (req: any, reply) => {
