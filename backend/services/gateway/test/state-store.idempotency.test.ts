@@ -17,14 +17,14 @@ describe('GatewayStateStore.withIdempotency', () => {
       signalStarted();
       await gate;
       return { conflict: false, userId: 'stable-user-id' };
-    });
+    }, 'fp-1');
 
     await started;
     await expect(
       state.withIdempotency('register:key-001', 300, async () => {
         runCount += 1;
         return { conflict: false, userId: 'other-user-id' };
-      })
+      }, 'fp-1')
     ).rejects.toThrow('idempotency_conflict');
 
     release();
@@ -36,12 +36,22 @@ describe('GatewayStateStore.withIdempotency', () => {
       state.withIdempotency('register:key-001', 300, async () => {
         runCount += 1;
         return { conflict: false, userId: 'other-user-id' };
-      })
+      }, 'fp-1')
     ).resolves.toEqual({
       deduped: true,
       result: { conflict: false, userId: 'stable-user-id' },
     });
     expect(runCount).toBe(1);
+  });
+
+
+  it('rejects reuse of a completed key with a different request fingerprint', async () => {
+    const state = new GatewayStateStore(fakeRedis() as any);
+    await state.withIdempotency('register:key-002', 300, async () => ({ userId: 'first-user' }), 'fp-first');
+
+    await expect(
+      state.withIdempotency('register:key-002', 300, async () => ({ userId: 'second-user' }), 'fp-second')
+    ).rejects.toThrow('idempotency_payload_conflict');
   });
 
   it('fails closed while a prior attempt has no completed result', async () => {
