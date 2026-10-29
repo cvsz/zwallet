@@ -16,10 +16,43 @@ export const fakeRedis = () => {
       return 'OK';
     },
     setex: async (k: string, _s: number, v: string) => { map.set(k, v); return 'OK'; },
-    eval: async (_script: string, _numKeys: number, key: string, ...args: string[]) => {
-      if (args.length === 3) {
+    eval: async (script: string, numKeys: number, ...args: string[]) => {
+      const keys = args.slice(0, numKeys);
+      const argv = args.slice(numKeys);
+
+      if (script.includes('IDEMPOTENCY_CLAIM_V1')) {
+        const [lockKey, resultKey, fingerprintKey] = keys;
+        const [ownerToken, fingerprint] = argv;
+        const existing = map.get(resultKey);
+        if (existing !== undefined) {
+          return map.get(fingerprintKey) === fingerprint
+            ? ['REPLAY', existing]
+            : ['CONFLICT'];
+        }
+        if (map.has(lockKey)) {
+          const storedFingerprint = map.get(fingerprintKey);
+          return storedFingerprint !== undefined && storedFingerprint !== fingerprint
+            ? ['CONFLICT']
+            : ['BUSY'];
+        }
+        map.set(lockKey, ownerToken);
+        map.set(fingerprintKey, fingerprint);
+        return ['CLAIMED'];
+      }
+
+      if (script.includes('IDEMPOTENCY_COMPLETE_V1')) {
+        const [lockKey, resultKey] = keys;
+        const [ownerToken, serialized] = argv;
+        if (map.get(lockKey) !== ownerToken) return 0;
+        map.set(resultKey, serialized);
+        map.delete(lockKey);
+        return 1;
+      }
+
+      const key = keys[0];
+      if (argv.length === 3) {
         if (hashes.has(key)) return 0;
-        const [id, email, passwordHash] = args;
+        const [id, email, passwordHash] = argv;
         const h = new Map<string, string>();
         h.set('id', id);
         h.set('email', email);
@@ -27,15 +60,15 @@ export const fakeRedis = () => {
         hashes.set(key, h);
         return 1;
       }
-      if (args.length === 2) {
-        const [legacyPassword, passwordHash] = args;
+      if (argv.length === 2) {
+        const [legacyPassword, passwordHash] = argv;
         const h = hashes.get(key);
         if (!h || h.has('password_hash') || h.get('password') !== legacyPassword) return 0;
         h.set('password_hash', passwordHash);
         h.delete('password');
         return 1;
       }
-      if (args.length === 0) {
+      if (argv.length === 0) {
         const h = hashes.get(key);
         if (!h?.has('password_hash')) return 0;
         h.delete('password');
