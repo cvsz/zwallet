@@ -3,13 +3,35 @@ import { randomUUID } from 'node:crypto';
 type CacheLike = {
   get: (k: string) => Promise<string | null>;
   setex: (k: string, s: number, v: string) => Promise<unknown>;
-  set: (k: string, v: string, mode?: string, cond?: string) => Promise<unknown>;
+  set: (k: string, v: string, mode?: string, duration?: string, condition?: string) => Promise<unknown>;
+  eval: (script: string, numberOfKeys: number, ...args: string[]) => Promise<unknown>;
   lpush: (k: string, v: string) => Promise<number>;
   lrange: (k: string, start: number, stop: number) => Promise<string[]>;
   hget: (k: string, f: string) => Promise<string | null>;
   hset: (k: string, ...args: string[]) => Promise<number>;
   del: (k: string) => Promise<number>;
 };
+
+// Claim/replay is atomic. In-flight claims deliberately have no TTL: an expired lease
+// must never let a second worker repeat a potentially completed external side effect.
+export const IDEMPOTENCY_CLAIM_SCRIPT = `-- IDEMPOTENCY_CLAIM_V1
+local existing = redis.call('GET', KEYS[2])
+if existing then
+  return {'REPLAY', existing}
+end
+local claimed = redis.call('SET', KEYS[1], ARGV[1], 'NX')
+if claimed then
+  return {'CLAIMED'}
+end
+return {'BUSY'}`;
+
+export const IDEMPOTENCY_COMPLETE_SCRIPT = `-- IDEMPOTENCY_COMPLETE_V1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+  return 0
+end
+redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+redis.call('DEL', KEYS[1])
+return 1`;
 
 export type TxStep = { step: number; name: string; status: 'completed' | 'failed'; error?: string; txHash?: string };
 export type TxLifecycleState = {
@@ -25,14 +47,42 @@ export class GatewayStateStore {
   constructor(private readonly redis: CacheLike) {}
 
   async withIdempotency<T>(key: string, ttlSec: number, run: () => Promise<T>): Promise<{ deduped: boolean; result: T }> {
-    const lock = await this.redis.set(`idem:${key}:lock`, '1', 'EX', String(ttlSec));
-    if (lock === null) {
-      const existing = await this.redis.get(`idem:${key}:result`);
-      if (!existing) throw new Error('idempotency_conflict');
-      return { deduped: true, result: JSON.parse(existing) as T };
+    if (!key.trim()) throw new Error('invalid_idempotency_key');
+    if (!Number.isSafeInteger(ttlSec) || ttlSec < 1) throw new Error('invalid_idempotency_ttl');
+
+    const lockKey = `idem:${key}:lock`;
+    const resultKey = `idem:${key}:result`;
+    const ownerToken = randomUUID();
+    const claim = await this.redis.eval(
+      IDEMPOTENCY_CLAIM_SCRIPT,
+      2,
+      lockKey,
+      resultKey,
+      ownerToken
+    ) as string[];
+
+    if (claim[0] === 'REPLAY') {
+      return { deduped: true, result: JSON.parse(claim[1]) as T };
     }
+    if (claim[0] !== 'CLAIMED') throw new Error('idempotency_conflict');
+
+    // A thrown/ambiguous handler intentionally leaves the non-expiring claim in place.
+    // Recovery must reconcile the external side effect before an operator clears it.
     const result = await run();
-    await this.redis.setex(`idem:${key}:result`, ttlSec, JSON.stringify(result));
+    const serialized = JSON.stringify(result);
+    if (serialized === undefined) throw new Error('idempotency_result_not_serializable');
+
+    const completed = await this.redis.eval(
+      IDEMPOTENCY_COMPLETE_SCRIPT,
+      2,
+      lockKey,
+      resultKey,
+      ownerToken,
+      serialized,
+      String(ttlSec)
+    );
+    if (Number(completed) !== 1) throw new Error('idempotency_lock_lost');
+
     return { deduped: false, result };
   }
 
