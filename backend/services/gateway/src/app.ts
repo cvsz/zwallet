@@ -70,6 +70,13 @@ export const buildApp = (deps: Deps = {}) => {
     const idempotencyDigest = createHash('sha256')
       .update(`${parsed.data.email}\0${requestKey}`)
       .digest('hex');
+    const requestFingerprint = createHash('sha256')
+      .update(JSON.stringify({
+        email: parsed.data.email,
+        password: parsed.data.password,
+        deviceId: parsed.data.deviceId,
+      }))
+      .digest('hex');
 
     try {
       const { result } = await state.withIdempotency(`auth:register:${idempotencyDigest}`, 300, async () => {
@@ -78,10 +85,13 @@ export const buildApp = (deps: Deps = {}) => {
         if (!user) return { conflict: true as const };
         await state.appendAudit('auth.register', user.id, { email: parsed.data.email, deviceId: parsed.data.deviceId });
         return { conflict: false as const, userId: user.id };
-      });
+      }, requestFingerprint);
       if (result.conflict) return reply.code(409).send({ error: 'account_already_exists' });
       return reply.send({ userId: result.userId });
     } catch (error) {
+      if (error instanceof Error && error.message === 'idempotency_payload_conflict') {
+        return reply.code(409).send({ error: 'idempotency_key_reused' });
+      }
       if (error instanceof Error && error.message === 'idempotency_conflict') {
         return reply.code(409).send({ error: 'registration_in_progress' });
       }
