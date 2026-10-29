@@ -52,9 +52,10 @@ The gateway regression tests and real-Redis integration tests are committed on t
 
 - Account creation uses a Redis Lua guard to refuse an existing `user:<email>` record; it never replaces the existing user ID or password hash.
 - A duplicate registration with a different request key returns HTTP 409 (`account_already_exists`).
-- Clients may supply `Idempotency-Key` (1–128 characters from `A-Z a-z 0-9 . _ : -`) to replay a completed registration result safely. If an identical key is still in progress, the API returns HTTP 409 (`registration_in_progress`) and the client may retry the same key.
+- Clients may supply `Idempotency-Key` (1–128 characters from `A-Z a-z 0-9 . _ : -`) to replay a completed registration result safely. The request fingerprint binds the key to the validated email, password, and device ID; reusing the same key with a different payload returns HTTP 409 (`idempotency_key_reused`).
+- The Redis Lua claim is atomic and uses an owner token. In-flight claims have no TTL, so a callback that outlives the result TTL cannot be duplicated. If a callback fails ambiguously, the claim remains blocked until an operator reconciles the side effect; do not clear it blindly.
 - When the header is omitted, each registration attempt receives a new request key; duplicate accounts are still rejected atomically.
-- Idempotency keys are hashed before being used in Redis keys. The request password is never included in the key or audit event.
+- Idempotency keys are hashed before being used in Redis keys. The request password is included only in an in-memory SHA-256 fingerprint and is never included in a Redis key, idempotency result, audit event, or log.
 
 
 ## Read-only legacy credential inventory
