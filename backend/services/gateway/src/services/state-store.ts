@@ -23,20 +23,81 @@ export type TxLifecycleState = {
   updatedBalances?: { from?: number; to?: number };
 };
 
+export const IDEMPOTENCY_CLAIM_SCRIPT = `-- IDEMPOTENCY_CLAIM_V1
+local existing = redis.call('GET', KEYS[2])
+local existingFingerprint = redis.call('GET', KEYS[3])
+if existing then
+  if existingFingerprint ~= ARGV[2] then return {'CONFLICT'} end
+  return {'REPLAY', existing}
+end
+local claimed = redis.call('SET', KEYS[1], ARGV[1], 'NX')
+if claimed then
+  redis.call('SET', KEYS[3], ARGV[2])
+  return {'CLAIMED'}
+end
+if existingFingerprint and existingFingerprint ~= ARGV[2] then return {'CONFLICT'} end
+return {'BUSY'}`;
+
+export const IDEMPOTENCY_COMPLETE_SCRIPT = `-- IDEMPOTENCY_COMPLETE_V1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+redis.call('EXPIRE', KEYS[3], ARGV[3])
+redis.call('DEL', KEYS[1])
+return 1`;
+
 export class GatewayStateStore {
   constructor(private readonly redis: CacheLike) {}
 
-  async withIdempotency<T>(key: string, ttlSec: number, run: () => Promise<T>): Promise<{ deduped: boolean; result: T }> {
+  async withIdempotency<T>(
+    key: string,
+    ttlSec: number,
+    run: () => Promise<T>,
+    fingerprint = '',
+  ): Promise<{ deduped: boolean; result: T }> {
+    if (!key.trim()) throw new Error('invalid_idempotency_key');
+    if (!Number.isSafeInteger(ttlSec) || ttlSec < 1) throw new Error('invalid_idempotency_ttl');
+    if (typeof fingerprint !== 'string' || fingerprint.length > 256) {
+      throw new Error('invalid_idempotency_fingerprint');
+    }
+
     const lockKey = `idem:${key}:lock`;
     const resultKey = `idem:${key}:result`;
-    const lock = await this.redis.set(lockKey, '1', 'EX', String(ttlSec), 'NX');
-    if (lock !== 'OK') {
-      const existing = await this.redis.get(resultKey);
-      if (!existing) throw new Error('idempotency_conflict');
-      return { deduped: true, result: JSON.parse(existing) as T };
+    const fingerprintKey = `idem:${key}:fingerprint`;
+    const ownerToken = randomUUID();
+    const claim = await this.redis.eval(
+      IDEMPOTENCY_CLAIM_SCRIPT,
+      3,
+      lockKey,
+      resultKey,
+      fingerprintKey,
+      ownerToken,
+      fingerprint,
+    ) as string[];
+
+    if (claim[0] === 'REPLAY') {
+      return { deduped: true, result: JSON.parse(claim[1]) as T };
     }
+    if (claim[0] === 'CONFLICT') throw new Error('idempotency_payload_conflict');
+    if (claim[0] !== 'CLAIMED') throw new Error('idempotency_conflict');
+
+    // An ambiguous failure leaves the non-expiring claim in place; an operator must
+    // reconcile the side effect before clearing it. This avoids duplicate execution.
     const result = await run();
-    await this.redis.setex(resultKey, ttlSec, JSON.stringify(result));
+    const serialized = JSON.stringify(result);
+    if (serialized === undefined) throw new Error('idempotency_result_not_serializable');
+
+    const completed = await this.redis.eval(
+      IDEMPOTENCY_COMPLETE_SCRIPT,
+      3,
+      lockKey,
+      resultKey,
+      fingerprintKey,
+      ownerToken,
+      serialized,
+      String(ttlSec),
+    );
+    if (Number(completed) !== 1) throw new Error('idempotency_lock_lost');
+
     return { deduped: false, result };
   }
 
