@@ -188,4 +188,56 @@ describeWithRedis('gateway password storage with real Redis', () => {
       await redis!.del(`user:${email}`, `devices:${userId}`);
     }
   });
+  it('keeps an in-flight idempotency claim past result TTL and rejects changed payloads', async () => {
+    const key = `ci-idempotency-${randomUUID()}`;
+    const redisKeys = [`idem:${key}:lock`, `idem:${key}:result`, `idem:${key}:fingerprint`];
+    let runCount = 0;
+    let signalStarted!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+
+    try {
+      const first = state.withIdempotency(key, 1, async () => {
+        runCount += 1;
+        signalStarted();
+        await gate;
+        return { operationId: 'stable-operation' };
+      }, 'request-fingerprint-a');
+
+      await started;
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+
+      await expect(
+        state.withIdempotency(key, 1, async () => {
+          runCount += 1;
+          return { operationId: 'duplicate-operation' };
+        }, 'request-fingerprint-a'),
+      ).rejects.toThrow('idempotency_conflict');
+
+      await expect(
+        state.withIdempotency(key, 1, async () => ({ operationId: 'wrong-payload' }), 'request-fingerprint-b'),
+      ).rejects.toThrow('idempotency_payload_conflict');
+
+      release();
+      await expect(first).resolves.toEqual({
+        deduped: false,
+        result: { operationId: 'stable-operation' },
+      });
+      await expect(
+        state.withIdempotency(key, 30, async () => ({ operationId: 'unexpected' }), 'request-fingerprint-a'),
+      ).resolves.toEqual({
+        deduped: true,
+        result: { operationId: 'stable-operation' },
+      });
+      await expect(
+        state.withIdempotency(key, 30, async () => ({ operationId: 'wrong-payload' }), 'request-fingerprint-b'),
+      ).rejects.toThrow('idempotency_payload_conflict');
+      expect(runCount).toBe(1);
+    } finally {
+      release?.();
+      await redis!.del(...redisKeys);
+    }
+  });
+
 });
