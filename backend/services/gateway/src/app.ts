@@ -73,7 +73,7 @@ export const buildApp = (deps: Deps = {}) => {
     const fingerprintSecret = process.env.IDEMPOTENCY_FINGERPRINT_SECRET ?? process.env.JWT_SECRET;
     if (!fingerprintSecret) return reply.code(503).send({ error: 'idempotency_unavailable' });
     const requestFingerprint = createHmac('sha256', fingerprintSecret)
-      .update('zwallet:registration-idempotency:v1\\0')
+      .update('zwallet:registration-idempotency:v1:')
       .update(JSON.stringify({
         email: parsed.data.email,
         password: parsed.data.password,
