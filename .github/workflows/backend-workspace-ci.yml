@@ -23,21 +23,22 @@ jobs:
         working-directory: backend
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
 
-      # Bootstrap the stale lock once, then publish it as an artifact so it can
-      # be reviewed and committed. The final drift check intentionally fails
-      # until the generated lockfile is committed to the PR.
-      - name: Regenerate backend workspace lockfile for verification
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Install backend workspace from committed lockfile
+        run: npm ci --no-audit --no-fund
 
-      - name: Install backend workspace
-        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify install did not mutate the committed lockfile
+        run: git -C .. diff --exit-code -- backend/package-lock.json
 
       - name: Generate Prisma client
         run: npm run prisma:generate --workspace @zwallet/gateway
@@ -47,15 +48,3 @@ jobs:
 
       - name: Run gateway regression suite
         run: npm run test --workspace @zwallet/gateway
-
-      - name: Publish regenerated lockfile for review
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: zwallet-backend-package-lock-${{ github.sha }}
-          path: backend/package-lock.json
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Require committed lockfile to match manifests
-        run: git -C .. diff --exit-code -- backend/package-lock.json
