@@ -55,7 +55,18 @@ export const buildApp = (deps: Deps = {}) => {
   app.get('/health', async () => ({ service: 'gateway', status: 'ok' }));
   app.post('/v1/auth/register', async (req, reply) => { const parsed = registerSchema.safeParse(req.body); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() }); const { result } = await state.withIdempotency(`auth:register:${parsed.data.email}`, 300, async () => { const user = await state.createUser(parsed.data.email, parsed.data.password, parsed.data.deviceId); await state.appendAudit('auth.register', user.id, parsed.data as any); return { userId: user.id }; }); return reply.send(result); });
 
-  app.post('/v1/auth/device/bind', async (req, reply) => { const parsed = deviceBindSchema.safeParse(req.body); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() }); await state.bindDevice((parsed.data as any).userId, (parsed.data as any).deviceId); return { bound: true }; });
+  app.post('/v1/auth/device/bind', { preHandler: [authGuard] }, async (req: any, reply) => {
+    const parsed = deviceBindSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    if (parsed.data.userId !== req.user.sub) {
+      return reply.code(403).header('cache-control', 'no-store').send({ error: 'user_mismatch' });
+    }
+
+    await state.bindDevice(req.user.sub, parsed.data.deviceId);
+    const deviceDigest = createHash('sha256').update(parsed.data.deviceId).digest('hex');
+    await state.appendAudit('auth.device.bind', req.user.sub, { deviceIdDigest: deviceDigest });
+    return reply.header('cache-control', 'no-store').send({ bound: true });
+  });
   app.post('/v1/auth/refresh', async (req: FastifyRequest, reply: FastifyReply) => {
     const parsed = refreshSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
