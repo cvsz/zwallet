@@ -20,6 +20,10 @@ const isLifecycleSimulationEnabled = () =>
   ['development', 'test'].includes(process.env.NODE_ENV ?? '') &&
   process.env.WALLET_ENABLE_TRANSACTION_LIFECYCLE_SIMULATION === 'true';
 
+const isSandboxMpcAaEnabled = () =>
+  ['development', 'test'].includes(process.env.NODE_ENV ?? '') &&
+  process.env.WALLET_ENABLE_SANDBOX_MPC_AA === 'true';
+
 export const buildApp = (deps: Deps = {}) => {
   const app = Fastify({ logger: false });
   const redis = deps.rateLimiter && deps.cache ? null : new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', { lazyConnect: true });
@@ -265,6 +269,13 @@ export const buildApp = (deps: Deps = {}) => {
 
 
   app.post('/v1/mpc/sign-transaction', { preHandler: [authGuard] }, async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!isSandboxMpcAaEnabled()) {
+      return reply
+        .code(503)
+        .header('cache-control', 'no-store')
+        .send({ error: 'sandbox_mpc_aa_disabled' });
+    }
+
     const parsed = mpcRequestSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     
@@ -279,6 +290,13 @@ export const buildApp = (deps: Deps = {}) => {
   });
 
   app.post('/v1/aa/user-operations', { preHandler: [authGuard] }, async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!isSandboxMpcAaEnabled()) {
+      return reply
+        .code(503)
+        .header('cache-control', 'no-store')
+        .send({ error: 'sandbox_mpc_aa_disabled' });
+    }
+
     try {
       // Simulation: Build and submit UserOp
       const userOpHash = `0xop_${randomUUID().slice(0, 12)}`;
@@ -289,7 +307,14 @@ export const buildApp = (deps: Deps = {}) => {
     }
   });
 
-  app.get('/v1/aa/user-operations/:userOpHash/status', { preHandler: [authGuard] }, async (req: any) => {
+  app.get('/v1/aa/user-operations/:userOpHash/status', { preHandler: [authGuard] }, async (req: any, reply: any) => {
+    if (!isSandboxMpcAaEnabled()) {
+      return reply
+        .code(503)
+        .header('cache-control', 'no-store')
+        .send({ error: 'sandbox_mpc_aa_disabled' });
+    }
+
     return { userOpHash: req.params.userOpHash, status: await userOpService.status(req.params.userOpHash) };
   });
 
