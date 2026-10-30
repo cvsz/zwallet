@@ -6,6 +6,8 @@ describe('security attack paths', () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('WALLET_ENABLE_TRANSACTION_LIFECYCLE_SIMULATION', 'true');
     resetStore();
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (String(url).includes('/v1/tx/verify-signature')) {
@@ -17,6 +19,7 @@ describe('security attack paths', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     global.fetch = originalFetch;
   });
 
