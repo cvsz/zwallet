@@ -97,21 +97,33 @@ describeWithRedis('gateway password storage with real Redis', () => {
     expect(storedPassword).toBeNull();
   });
 
-  it('cleans stale plaintext from a record that already has a hash', async () => {
-    const passwordHash = await hashPassword('existing-hash-password');
+  it('removes legacy plaintext after a successful login against the stored hash', async () => {
+    const password = 'existing-hash-password';
+    const passwordHash = await hashPassword(password);
+    const userId = randomUUID();
+    const deviceId = `device-${randomUUID()}`;
     await redis!.hset(
       `user:${staleEmail}`,
-      'id', 'stale-integration-user',
+      'id', userId,
       'email', staleEmail,
       'password_hash', passwordHash,
-      'password', 'must-be-removed',
+      'password', password,
     );
+    await redis!.hset(`devices:${userId}`, deviceId, '1');
 
-    const user = await state.getUser(staleEmail);
-
-    expect(user?.passwordHash).toBe(passwordHash);
-    expect(user?.legacyPassword).toBeNull();
-    expect(await redis!.hget(`user:${staleEmail}`, 'password')).toBeNull();
+    const app = buildApp({ rateLimiter: redis as any, cache: redis as any });
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/login',
+        payload: { email: staleEmail, password, deviceId },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(await redis!.hget(`user:${staleEmail}`, 'password')).toBeNull();
+      expect(await redis!.hget(`user:${staleEmail}`, 'password_hash')).toBe(passwordHash);
+    } finally {
+      await app.close();
+    }
   });
 
   it('rejects concurrent duplicate registrations without overwriting credentials or binding the losing device', async () => {
