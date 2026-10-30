@@ -1,0 +1,61 @@
+name: Backend Workspace CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-workspace-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-workspace-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Bootstrap the stale lock once, then publish it as an artifact so it can
+      # be reviewed and committed. The final drift check intentionally fails
+      # until the generated lockfile is committed to the PR.
+      - name: Regenerate backend workspace lockfile for verification
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Install backend workspace
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace @zwallet/gateway
+
+      - name: Build gateway
+        run: npm run build --workspace @zwallet/gateway
+
+      - name: Run gateway regression suite
+        run: npm run test --workspace @zwallet/gateway
+
+      - name: Publish regenerated lockfile for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zwallet-backend-package-lock-${{ github.sha }}
+          path: backend/package-lock.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Require committed lockfile to match manifests
+        run: git -C .. diff --exit-code -- backend/package-lock.json
