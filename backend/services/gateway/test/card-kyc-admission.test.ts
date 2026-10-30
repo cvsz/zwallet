@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { KycService } from '../src/services/compliance/kyc-service.js';
+import { CardOrchestrator } from '../src/services/card/card-orchestrator.js';
 import { fakeRedis } from './helpers.js';
 
 const USER_A = '00000000-0000-4000-8000-000000000001';
@@ -112,6 +113,24 @@ describe('card and KYC admission boundaries', () => {
   it('rejects control characters in KYC provider credentials before network I/O', async () => {
     const service = new KycService('https://kyc.example/api/v1', 'provider-key\\nforged');
     await expect(service.start({ userId: USER_A, country: 'TH' })).rejects.toThrow('KYC_PROVIDER_UNAVAILABLE');
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects placeholder and control-character issuer credentials before network I/O', async () => {
+    for (const credential of ['local-dev-key', 'issuer-key\\nforged']) {
+      const service = new CardOrchestrator(
+        'https://issuer.example',
+        credential,
+        {} as any,
+        {} as any,
+      );
+      await expect(service.issueCard({
+        userId: USER_A,
+        kycLevel: 'full',
+        type: 'virtual',
+        currency: 'USD',
+      })).rejects.toThrow('ISSUER_UNAVAILABLE');
+    }
     expect(providerFetch).not.toHaveBeenCalled();
   });
 
