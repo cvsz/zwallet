@@ -109,6 +109,21 @@ describe('card and KYC admission boundaries', () => {
     await app.close();
   });
 
+  it('preserves the configured KYC provider base path', async () => {
+    providerFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ applicantId: 'applicant-123' }),
+    } as Response);
+    const service = new KycService('https://kyc.example/api/v1', 'provider-test-key');
+
+    await service.start({ userId: USER_A, country: 'TH' });
+
+    expect(providerFetch).toHaveBeenCalledWith(
+      new URL('https://kyc.example/api/v1/applicants'),
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
   it('requires an explicit level for an approved KYC webhook event', () => {
     const service = new KycService('https://kyc-provider.invalid', 'test-key');
     expect(() => service.webhookUpdate({

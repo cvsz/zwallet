@@ -41,7 +41,8 @@ export class KycService {
       throw new Error('KYC_PROVIDER_UNAVAILABLE');
     }
 
-    const res = await fetch(new URL('/applicants', providerUrl), {
+    const applicantsUrl = new URL('applicants', providerUrl.href.endsWith('/') ? providerUrl.href : `${providerUrl.href}/`);
+    const res = await fetch(applicantsUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'X-API-Key': this.apiKey },
       body: JSON.stringify(req),
