@@ -14,9 +14,11 @@ The gateway currently has no authoritative, durable KYC decision store bound to 
 Until the missing trust boundaries are implemented:
 
 - KYC application creation is bound to the authenticated JWT subject; a mismatched body `userId` is rejected before provider I/O.
+- Missing provider URL/key and the known `local-dev-key` placeholder fail closed before network I/O. Provider URLs must use HTTPS, except loopback-only development/test use.
 - An approved KYC event must carry an explicit level. Missing level is an invalid approval, never an implicit `full`.
 - Card issuance returns HTTP 503 with `Cache-Control: no-store`; client-supplied `kycLevel` is not accepted as proof of approval.
 - Card freeze returns HTTP 503 with `Cache-Control: no-store`; the gateway does not invoke the privileged issuer API without an authoritative owner binding.
+- The gateway no longer injects `local-dev-key` defaults into the KYC or issuer adapters; adapters reject missing/placeholder credentials.
 
 These controls intentionally make card issuance and freeze unavailable until the provider and persistence contracts can prove authorization. Do not add an environment flag or client parameter that bypasses these gates.
 

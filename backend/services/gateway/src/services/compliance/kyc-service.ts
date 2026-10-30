@@ -12,7 +12,36 @@ export class KycService {
 
   async start(input: unknown) {
     const req = KycStart.parse(input);
-    const res = await fetch(`${this.providerBase}/applicants`, {
+    if (
+      !this.providerBase ||
+      !this.apiKey ||
+      this.apiKey === 'local-dev-key' ||
+      this.apiKey !== this.apiKey.trim() ||
+      /[\\x00-\\x1F\\x7F]/.test(this.apiKey)
+    ) {
+      throw new Error('KYC_PROVIDER_UNAVAILABLE');
+    }
+
+    let providerUrl: URL;
+    try {
+      providerUrl = new URL(this.providerBase);
+    } catch {
+      throw new Error('KYC_PROVIDER_UNAVAILABLE');
+    }
+    const isLoopback = ['localhost', '127.0.0.1', '[::1]'].includes(providerUrl.hostname);
+    const localTestRuntime = ['development', 'test'].includes(process.env.NODE_ENV ?? '');
+    if (
+      !['https:', 'http:'].includes(providerUrl.protocol) ||
+      providerUrl.username ||
+      providerUrl.password ||
+      providerUrl.search ||
+      providerUrl.hash ||
+      (providerUrl.protocol !== 'https:' && !(isLoopback && localTestRuntime))
+    ) {
+      throw new Error('KYC_PROVIDER_UNAVAILABLE');
+    }
+
+    const res = await fetch(new URL('/applicants', providerUrl), {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'X-API-Key': this.apiKey },
       body: JSON.stringify(req),

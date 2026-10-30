@@ -11,6 +11,10 @@ describe('card and KYC admission boundaries', () => {
 
   beforeEach(() => {
     vi.stubEnv('JWT_SECRET', 'test-secret');
+    vi.stubEnv('KYC_PROVIDER_BASE', '');
+    vi.stubEnv('KYC_PROVIDER_KEY', '');
+    vi.stubEnv('ISSUER_BASE', '');
+    vi.stubEnv('ISSUER_KEY', '');
     providerFetch.mockReset();
     vi.stubGlobal('fetch', providerFetch);
   });
@@ -49,6 +53,22 @@ describe('card and KYC admission boundaries', () => {
 
     expect(response.statusCode).toBe(403);
     expect(response.json()).toEqual({ error: 'user_mismatch' });
+    expect(providerFetch).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('does not call the KYC provider when its URL or credential is unconfigured', async () => {
+    const { app, headers } = await createAuthenticatedApp(USER_A);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/compliance/kyc/start',
+      headers: headers('kyc-provider-unconfigured'),
+      payload: { userId: USER_A, country: 'TH' },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toEqual({ error: 'kyc_provider_unavailable' });
     expect(providerFetch).not.toHaveBeenCalled();
     await app.close();
   });

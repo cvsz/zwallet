@@ -28,8 +28,8 @@ export const buildApp = (deps: Deps = {}) => {
   const userOpService = new UserOperationService(new InMemoryBundlerClient());
   const riskEngine = new RiskEngine();
   const offrampService = new OfframpService((process.env.RFQ_ENDPOINTS ?? '').split(',').filter(Boolean), { credit: async () => undefined });
-  const cardOrchestrator = new CardOrchestrator(process.env.ISSUER_BASE ?? 'http://issuer.local', process.env.ISSUER_KEY ?? 'local-dev-key', riskEngine, offrampService);
-  const kycService = new KycService(process.env.KYC_PROVIDER_BASE ?? 'http://kyc-provider.local', process.env.KYC_PROVIDER_KEY ?? 'local-dev-key');
+  const cardOrchestrator = new CardOrchestrator(process.env.ISSUER_BASE ?? '', process.env.ISSUER_KEY ?? '', riskEngine, offrampService);
+  const kycService = new KycService(process.env.KYC_PROVIDER_BASE ?? '', process.env.KYC_PROVIDER_KEY ?? '');
 
   app.register(cors, { origin: true });
   if (redis) {
@@ -119,7 +119,14 @@ export const buildApp = (deps: Deps = {}) => {
     if (parsed.data.userId !== req.user.sub) {
       return reply.code(403).send({ error: 'user_mismatch' });
     }
-    return kycService.start({ ...parsed.data, userId: req.user.sub });
+    try {
+      return await kycService.start({ ...parsed.data, userId: req.user.sub });
+    } catch {
+      return reply
+        .code(503)
+        .header('cache-control', 'no-store')
+        .send({ error: 'kyc_provider_unavailable' });
+    }
   });
 
   app.post('/v1/card/issue', { preHandler: [authGuard] }, async (req: any, reply) => {

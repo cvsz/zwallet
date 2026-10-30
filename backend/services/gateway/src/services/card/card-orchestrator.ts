@@ -49,6 +49,15 @@ export class CardOrchestrator {
   }
 
   private async callIssuer(path: string, payload?: unknown, method = 'POST') {
+    if (
+      !this.issuerBase ||
+      !this.apiKey ||
+      this.apiKey === 'local-dev-key' ||
+      this.apiKey !== this.apiKey.trim() ||
+      /[\\x00-\\x1F\\x7F]/.test(this.apiKey)
+    ) {
+      throw new Error('ISSUER_UNAVAILABLE');
+    }
     const res = await fetch(`${this.issuerBase}${path}`, {
       method,
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
