@@ -109,6 +109,12 @@ describe('card and KYC admission boundaries', () => {
     await app.close();
   });
 
+  it('rejects control characters in KYC provider credentials before network I/O', async () => {
+    const service = new KycService('https://kyc.example/api/v1', 'provider-key\\nforged');
+    await expect(service.start({ userId: USER_A, country: 'TH' })).rejects.toThrow('KYC_PROVIDER_UNAVAILABLE');
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
   it('preserves the configured KYC provider base path', async () => {
     providerFetch.mockResolvedValue({
       ok: true,

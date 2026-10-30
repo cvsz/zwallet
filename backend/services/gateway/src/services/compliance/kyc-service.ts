@@ -17,7 +17,7 @@ export class KycService {
       !this.apiKey ||
       this.apiKey === 'local-dev-key' ||
       this.apiKey !== this.apiKey.trim() ||
-      /[\\x00-\\x1F\\x7F]/.test(this.apiKey)
+      /[\x00-\x1F\x7F]/.test(this.apiKey)
     ) {
       throw new Error('KYC_PROVIDER_UNAVAILABLE');
     }
