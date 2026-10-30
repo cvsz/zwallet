@@ -22,6 +22,10 @@ Until the missing trust boundaries are implemented:
 
 These controls intentionally make card issuance and freeze unavailable until the provider and persistence contracts can prove authorization. Do not add an environment flag or client parameter that bypasses these gates.
 
+## Customer-impact gate
+
+The card-freeze route intentionally returns HTTP 503 while owner authorization is unproven. Before any merge/deployment of this containment, an operator must establish whether real cards are active and verify a separately authenticated issuer-side freeze channel, its support owner, and an incident runbook. If no independent freeze path is verified for existing cardholders, keep this change unreleased until the issuer contract provides owner-scoped freeze. Do not leave existing customers without a working emergency freeze path.
+
 ## Re-enable acceptance criteria
 
 1. Verify provider webhook signatures over the exact raw request body, including timestamp tolerance and key rotation.
