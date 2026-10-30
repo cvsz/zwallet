@@ -12,6 +12,7 @@ import path from 'node:path';
 
 const backendRoot = process.cwd();
 const repositoryRoot = path.resolve(backendRoot, '..');
+const problems = [];
 
 function readJson(file) {
   assert.ok(existsSync(file), `required workspace file is missing: ${path.relative(repositoryRoot, file)}`);
@@ -36,30 +37,42 @@ const rootWorkspaceEntries = [...rootWorkspaceText.matchAll(/^\s*-\s*['"]([^'"]+
 const overlappingRootEntries = rootWorkspaceEntries.filter((entry) =>
   entry === 'backend' || entry.startsWith('backend/'),
 );
-assert.deepEqual(
-  overlappingRootEntries,
-  [],
-  'backend packages must remain owned by backend/package-lock.json, not the root pnpm workspace',
-);
+for (const entry of overlappingRootEntries) {
+  problems.push(`root pnpm workspace overlaps backend npm ownership: ${entry}`);
+}
 
 const backendManifest = readJson(path.join(backendRoot, 'package.json'));
 const lock = readJson(path.join(backendRoot, 'package-lock.json'));
-assert.equal(lock.lockfileVersion, 3, 'backend npm workspace requires a committed lockfile v3');
-assert.ok(Array.isArray(backendManifest.workspaces), 'backend/package.json must declare npm workspaces');
+if (lock.lockfileVersion !== 3) {
+  problems.push(`backend npm lockfile must be version 3 (found ${lock.lockfileVersion})`);
+}
+if (!Array.isArray(backendManifest.workspaces)) {
+  problems.push('backend/package.json must declare npm workspaces');
+}
 
 const lockRoot = lock.packages?.[''];
-assert.ok(lockRoot, 'backend/package-lock.json must contain its root package entry');
-assert.deepEqual(
-  [...(lockRoot.workspaces ?? [])].sort(),
-  [...backendManifest.workspaces].sort(),
-  'backend npm workspace globs differ between package.json and package-lock.json',
-);
+if (!lockRoot) {
+  problems.push('backend/package-lock.json must contain its root package entry');
+}
+
+const declaredWorkspaces = Array.isArray(backendManifest.workspaces) ? backendManifest.workspaces : [];
+const lockedWorkspaces = Array.isArray(lockRoot?.workspaces) ? lockRoot.workspaces : [];
+if (JSON.stringify([...lockedWorkspaces].sort()) !== JSON.stringify([...declaredWorkspaces].sort())) {
+  problems.push('backend npm workspace globs differ between package.json and package-lock.json');
+}
 
 let checkedPackages = 0;
-for (const pattern of backendManifest.workspaces) {
-  assert.match(pattern, /^(packages|services)\/\*$/, `unsupported backend workspace pattern: ${pattern}`);
+for (const pattern of declaredWorkspaces) {
+  if (!/^(packages|services)\/\*$/.test(pattern)) {
+    problems.push(`unsupported backend workspace pattern: ${pattern}`);
+    continue;
+  }
+
   const parent = path.join(backendRoot, pattern.slice(0, -2));
-  assert.ok(existsSync(parent), `backend workspace directory is missing: ${pattern}`);
+  if (!existsSync(parent)) {
+    problems.push(`backend workspace directory is missing: ${pattern}`);
+    continue;
+  }
 
   for (const entry of readdirSync(parent, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
@@ -69,27 +82,34 @@ for (const pattern of backendManifest.workspaces) {
     const relativePath = path.posix.join(pattern.slice(0, -2), entry.name);
     const manifest = readJson(manifestPath);
     const locked = lock.packages?.[relativePath];
-    assert.ok(locked, `workspace package is absent from package-lock.json: ${relativePath}`);
-    assert.equal(locked.name, manifest.name, `workspace name mismatch: ${relativePath}`);
-    assert.equal(locked.version ?? '0.0.0', manifest.version ?? '0.0.0', `workspace version mismatch: ${relativePath}`);
-    assert.equal(
-      stableJson(locked.dependencies),
-      stableJson(manifest.dependencies),
-      `runtime dependency specs differ from the lockfile: ${relativePath}`,
-    );
-    assert.equal(
-      stableJson(locked.devDependencies),
-      stableJson(manifest.devDependencies),
-      `development dependency specs differ from the lockfile: ${relativePath}`,
-    );
-    assert.equal(
-      stableJson(locked.optionalDependencies),
-      stableJson(manifest.optionalDependencies),
-      `optional dependency specs differ from the lockfile: ${relativePath}`,
-    );
     checkedPackages += 1;
+
+    if (!locked) {
+      problems.push(`workspace package is absent from package-lock.json: ${relativePath}`);
+      continue;
+    }
+    if (locked.name !== manifest.name) {
+      problems.push(`workspace name mismatch: ${relativePath}`);
+    }
+    if ((locked.version ?? '0.0.0') !== (manifest.version ?? '0.0.0')) {
+      problems.push(`workspace version mismatch: ${relativePath}`);
+    }
+    for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+      if (stableJson(locked[field]) !== stableJson(manifest[field])) {
+        problems.push(`${field} specs differ from the lockfile: ${relativePath}`);
+      }
+    }
   }
 }
 
-assert.ok(checkedPackages > 0, 'no backend npm workspace packages were discovered');
-console.log(`backend workspace contract verified: ${checkedPackages} package manifests, npm lockfile v${lock.lockfileVersion}, root pnpm boundary isolated`);
+if (checkedPackages === 0) {
+  problems.push('no backend npm workspace packages were discovered');
+}
+
+if (problems.length > 0) {
+  console.error(`backend workspace contract failed with ${problems.length} finding(s):`);
+  for (const problem of problems) console.error(`- ${problem}`);
+  process.exitCode = 1;
+} else {
+  console.log(`backend workspace contract verified: ${checkedPackages} package manifests, npm lockfile v${lock.lockfileVersion}, root pnpm boundary isolated`);
+}
