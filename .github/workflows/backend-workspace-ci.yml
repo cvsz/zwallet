@@ -34,6 +34,9 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
+      - name: Verify backend npm workspace boundary and committed lock contract
+        run: node scripts/verify-workspace-lock.mjs
+
       - name: Install backend workspace from committed lockfile
         run: npm ci --no-audit --no-fund
 
