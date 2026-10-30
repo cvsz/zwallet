@@ -104,6 +104,81 @@ describe('e2e: create wallet, send transaction, swap token', () => {
     await app.close();
   });
 
+  it.each(['production', 'staging', ''] as const)(
+    'blocks stored synthetic lifecycle reads in runtime %s even when simulation is enabled',
+    async (runtime) => {
+      vi.stubEnv('NODE_ENV', runtime);
+      vi.stubEnv('WALLET_ENABLE_TRANSACTION_LIFECYCLE_SIMULATION', 'true');
+      process.env.JWT_SECRET = 'test-secret';
+
+      const cache = fakeRedis();
+      const txId = `legacy-synthetic-${runtime || 'unset'}`;
+      await cache.setex(
+        `tx:lifecycle:${txId}`,
+        86400,
+        JSON.stringify({
+          id: txId,
+          userId: 'user-1',
+          payload: { chain: 'evm' },
+          steps: [{ step: 4, name: 'transaction_broadcast_to_chain', status: 'completed' }],
+          status: 'confirmed',
+          updatedBalances: { from: 90, to: 10 },
+        }),
+      );
+      const lifecycleRead = vi.spyOn(cache, 'get');
+      const app = buildApp({ rateLimiter: cache as any, cache: cache as any });
+      await app.ready();
+      const token = await app.jwt.sign({ sub: 'user-1', deviceId: 'device-1', typ: 'access' });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/v1/transactions/lifecycle/${txId}`,
+        headers: { authorization: `Bearer ${token}`, 'x-nonce': `read-disabled-${runtime || 'unset'}` },
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.json()).toEqual({ error: 'transaction_lifecycle_simulation_disabled' });
+      expect(lifecycleRead).not.toHaveBeenCalledWith(`tx:lifecycle:${txId}`);
+      expect(response.body).not.toContain('confirmed');
+      await app.close();
+    },
+  );
+
+  it('does not expose a lifecycle record to a different authenticated user', async () => {
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('WALLET_ENABLE_TRANSACTION_LIFECYCLE_SIMULATION', 'true');
+    process.env.JWT_SECRET = 'test-secret';
+
+    const cache = fakeRedis();
+    const txId = 'user-owned-synthetic-lifecycle';
+    await cache.setex(
+      `tx:lifecycle:${txId}`,
+      86400,
+      JSON.stringify({
+        id: txId,
+        userId: 'user-2',
+        payload: { chain: 'evm' },
+        steps: [],
+        status: 'confirmed',
+      }),
+    );
+    const app = buildApp({ rateLimiter: cache as any, cache: cache as any });
+    await app.ready();
+    const token = await app.jwt.sign({ sub: 'user-1', deviceId: 'device-1', typ: 'access' });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/v1/transactions/lifecycle/${txId}`,
+      headers: { authorization: `Bearer ${token}`, 'x-nonce': 'cross-user-lifecycle-read' },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: 'not_found' });
+    expect(response.body).not.toContain('confirmed');
+    await app.close();
+  });
+
   it('runs wallet -> transaction -> swap flow', async () => {
     process.env.JWT_SECRET = 'test-secret';
     const app = buildApp({ rateLimiter: fakeRedis() as any, cache: fakeRedis() as any });
