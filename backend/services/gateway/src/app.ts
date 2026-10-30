@@ -119,7 +119,11 @@ export const buildApp = (deps: Deps = {}) => {
     return swap; 
   });
   app.get('/v1/prices/:symbol', { preHandler: [authGuard] }, async (req: FastifyRequest, reply: FastifyReply) => { const parsed = priceSchema.safeParse(req.params); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() }); const cacheKey = `price:${(parsed.data as any).symbol}`; const hit = await cache.get(cacheKey); if (hit) return { symbol: (parsed.data as any).symbol, price: Number(hit), source: 'cache' }; const quorumPrice = await rpcPool.call('eth_getBalance', [(parsed.data as any).symbol]) as { price: number }; const price = Number(quorumPrice.price.toFixed(2)); await cache.setex(cacheKey, 15, String(price)); await state.appendAudit('price.read', (req.user as any).sub, { symbol: (parsed.data as any).symbol, price }); return { symbol: (parsed.data as any).symbol, price, source: 'oracle' }; });
-  app.get('/v1/audit-logs', { preHandler: [authGuard] }, async () => ({ items: await state.readAudit() }));
+  app.get('/v1/audit-logs', { preHandler: [authGuard] }, async (req: any) => {
+    const authenticatedUserId = req.user.sub;
+    const items = await state.readAudit();
+    return { items: items.filter((item: any) => item.userId === authenticatedUserId) };
+  });
 
   app.post('/v1/compliance/kyc/start', { preHandler: [authGuard] }, async (req: FastifyRequest, reply: FastifyReply) => {
     const parsed = kycStartSchema.safeParse(req.body);
