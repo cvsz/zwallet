@@ -49,8 +49,24 @@ export const fakeRedis = () => {
         return 1;
       }
 
+      if (numKeys === 2 && argv.length === 4) {
+        const [userKey, devicesKey] = keys;
+        if (hashes.has(userKey)) return 0;
+        if (hashes.has(devicesKey)) throw new Error('device_binding_conflict');
+        const [id, email, passwordHash, deviceId] = argv;
+        const user = new Map<string, string>();
+        user.set('id', id);
+        user.set('email', email);
+        user.set('password_hash', passwordHash);
+        const devices = new Map<string, string>();
+        devices.set(deviceId, '1');
+        hashes.set(devicesKey, devices);
+        hashes.set(userKey, user);
+        return 1;
+      }
+
       const key = keys[0];
-      if (argv.length === 3) {
+      if (numKeys === 1 && argv.length === 3) {
         if (hashes.has(key)) return 0;
         const [id, email, passwordHash] = argv;
         const h = new Map<string, string>();
