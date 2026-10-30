@@ -113,17 +113,26 @@ export const buildApp = (deps: Deps = {}) => {
   app.get('/v1/prices/:symbol', { preHandler: [authGuard] }, async (req: FastifyRequest, reply: FastifyReply) => { const parsed = priceSchema.safeParse(req.params); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() }); const cacheKey = `price:${(parsed.data as any).symbol}`; const hit = await cache.get(cacheKey); if (hit) return { symbol: (parsed.data as any).symbol, price: Number(hit), source: 'cache' }; const quorumPrice = await rpcPool.call('eth_getBalance', [(parsed.data as any).symbol]) as { price: number }; const price = Number(quorumPrice.price.toFixed(2)); await cache.setex(cacheKey, 15, String(price)); await state.appendAudit('price.read', (req.user as any).sub, { symbol: (parsed.data as any).symbol, price }); return { symbol: (parsed.data as any).symbol, price, source: 'oracle' }; });
   app.get('/v1/audit-logs', { preHandler: [authGuard] }, async () => ({ items: await state.readAudit() }));
 
-  app.post('/v1/compliance/kyc/start', { preHandler: [authGuard] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  app.post('/v1/compliance/kyc/start', { preHandler: [authGuard] }, async (req: any, reply) => {
     const parsed = kycStartSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    return kycService.start(parsed.data);
+    if (parsed.data.userId !== req.user.sub) {
+      return reply.code(403).send({ error: 'user_mismatch' });
+    }
+    return kycService.start({ ...parsed.data, userId: req.user.sub });
   });
 
   app.post('/v1/card/issue', { preHandler: [authGuard] }, async (req: any, reply) => {
     const parsed = cardIssueSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     if (parsed.data.userId !== req.user.sub) return reply.code(403).send({ error: 'user_mismatch' });
-    return cardOrchestrator.issueCard(parsed.data);
+
+    // The request's kycLevel is client-controlled. The current KYC adapter only starts
+    // provider applications; it has no verified, durable approval record to authorize issuance.
+    return reply
+      .code(503)
+      .header('cache-control', 'no-store')
+      .send({ error: 'kyc_approval_unavailable' });
   });
 
   app.post('/v1/webhooks/issuer/auth', async (req: any, reply) => {
@@ -154,8 +163,13 @@ export const buildApp = (deps: Deps = {}) => {
   app.post('/v1/card/:id/freeze', { preHandler: [authGuard] }, async (req: any, reply) => {
     const parsed = cardFreezeSchema.safeParse(req.params);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    await cardOrchestrator.freeze(parsed.data.id);
-    return { ok: true };
+
+    // The gateway has no durable cardId -> owner binding. Do not call the privileged issuer
+    // API with a caller-selected card ID until the provider contract enforces owner scope.
+    return reply
+      .code(503)
+      .header('cache-control', 'no-store')
+      .send({ error: 'card_owner_verification_unavailable' });
   });
 
   app.post('/v1/transactions/lifecycle', { preHandler: [authGuard] }, async (req: any, reply) => {

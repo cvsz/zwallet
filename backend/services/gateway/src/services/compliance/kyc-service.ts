@@ -23,6 +23,10 @@ export class KycService {
 
   webhookUpdate(payload: unknown) {
     const parsed = KycWebhook.parse(payload);
-    return { userId: parsed.externalUserId, status: parsed.reviewStatus, level: parsed.level ?? 'full' };
+    if (parsed.reviewStatus === 'approved' && !parsed.level) {
+      throw new Error('KYC_APPROVAL_LEVEL_REQUIRED');
+    }
+    const update = { userId: parsed.externalUserId, status: parsed.reviewStatus };
+    return parsed.level ? { ...update, level: parsed.level } : update;
   }
 }
