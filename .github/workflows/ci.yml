@@ -18,7 +18,8 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile=false
+      - name: Install root workspace from the committed lockfile
+        run: pnpm install --frozen-lockfile=true
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm check:circular
