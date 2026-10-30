@@ -68,9 +68,10 @@ export const fakeRedis = () => {
         h.delete('password');
         return 1;
       }
-      if (argv.length === 0) {
+      if (argv.length === 1) {
+        const [expectedHash] = argv;
         const h = hashes.get(key);
-        if (!h?.has('password_hash')) return 0;
+        if (!h || h.get('password_hash') !== expectedHash) return 0;
         h.delete('password');
         return 1;
       }
