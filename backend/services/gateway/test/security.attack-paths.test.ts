@@ -70,4 +70,93 @@ describe('security attack paths', () => {
 
     await app.close();
   });
+
+  it('blocks sandbox MPC and account-abstraction operations in production before side effects', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('WALLET_ENABLE_SANDBOX_MPC_AA', 'true');
+    vi.stubEnv('JWT_SECRET', 'test-secret');
+
+    const cache = fakeRedis();
+    const app = buildApp({ rateLimiter: cache as any, cache: cache as any });
+    await app.ready();
+    const token = await app.jwt.sign({ sub: 'user-1', deviceId: 'device-1', typ: 'access' });
+    const headers = (nonce: string) => ({
+      authorization: `Bearer ${token}`,
+      'x-nonce': nonce,
+    });
+
+    const mpc = await app.inject({
+      method: 'POST',
+      url: '/v1/mpc/sign-transaction',
+      headers: headers('production-sandbox-mpc'),
+      payload: {
+        payload: '0x1234',
+        threshold: 2,
+        participants: ['participant-a'],
+        attestationToken: 'test-attestation-token',
+      },
+    });
+    const userOperation = await app.inject({
+      method: 'POST',
+      url: '/v1/aa/user-operations',
+      headers: headers('production-sandbox-aa'),
+      payload: { idempotencyKey: 'test-operation', chainId: 1, sender: '0x12345', nonce: 0, callData: '0x01' },
+    });
+    const status = await app.inject({
+      method: 'GET',
+      url: '/v1/aa/user-operations/0xop_fake/status',
+      headers: headers('production-sandbox-aa-status'),
+    });
+
+    for (const response of [mpc, userOperation, status]) {
+      expect(response.statusCode).toBe(503);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.json()).toEqual({ error: 'sandbox_mpc_aa_disabled' });
+    }
+    expect(await cache.lrange('audit:logs', 0, -1)).toHaveLength(0);
+    expect(global.fetch).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
+  it('keeps sandbox MPC and account-abstraction routes available only with explicit test opt-in', async () => {
+    vi.stubEnv('WALLET_ENABLE_SANDBOX_MPC_AA', 'true');
+    vi.stubEnv('JWT_SECRET', 'test-secret');
+
+    const cache = fakeRedis();
+    const app = buildApp({ rateLimiter: cache as any, cache: cache as any });
+    await app.ready();
+    const token = await app.jwt.sign({ sub: 'user-1', deviceId: 'device-1', typ: 'access' });
+    const headers = (nonce: string) => ({
+      authorization: `Bearer ${token}`,
+      'x-nonce': nonce,
+    });
+
+    const mpc = await app.inject({
+      method: 'POST',
+      url: '/v1/mpc/sign-transaction',
+      headers: headers('test-sandbox-mpc'),
+      payload: {
+        payload: '0x1234',
+        threshold: 2,
+        participants: ['participant-a'],
+        attestationToken: 'test-attestation-token',
+      },
+    });
+    const userOperation = await app.inject({
+      method: 'POST',
+      url: '/v1/aa/user-operations',
+      headers: headers('test-sandbox-aa'),
+      payload: { idempotencyKey: 'test-operation', chainId: 1, sender: '0x12345', nonce: 0, callData: '0x01' },
+    });
+
+    expect(mpc.statusCode).toBe(200);
+    expect(mpc.json().status).toBe('initiated');
+    expect(userOperation.statusCode).toBe(200);
+    expect(userOperation.json().status).toBe('submitted');
+    expect(await cache.lrange('audit:logs', 0, -1)).toHaveLength(2);
+
+    await app.close();
+  });
+
 });
