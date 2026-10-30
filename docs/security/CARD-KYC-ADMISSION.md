@@ -40,3 +40,9 @@ The card-freeze route intentionally returns HTTP 503 while owner authorization i
 ## Rollback
 
 Keep the fail-closed responses in place if the KYC store, webhook verification, or issuer ownership check is unavailable. Do not restore client-controlled KYC admission or unscoped issuer freeze calls. Any re-enablement must be a separate reviewed change with sandbox evidence.
+
+## Provider transport boundary
+
+KYC and issuer requests carry provider credentials and must not follow redirects. Both adapters use manual redirect handling, reject every 3xx response before parsing a body, and enforce a 5-second request timeout. The issuer base URL must be HTTPS; HTTP is allowed only for loopback in development/test. Userinfo, query strings, fragments, unsupported schemes, and cross-origin endpoint construction are rejected before credential-bearing I/O.
+
+A provider redirect is a configuration/protocol failure. Do not retry the redirected URL, copy credentials to a Location target, or disable this control to accommodate a provider. Correct the provider endpoint and verify the exact origin out of band.
