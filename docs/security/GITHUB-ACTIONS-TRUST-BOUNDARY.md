@@ -41,3 +41,6 @@ Main `.github/workflows/cicd.yml` still contains automatic deployment behavior. 
 ## Rollback
 
 Do not restore the removed privileged `workflow_run` auto-fix workflow or PR-triggered registry publication. If automation must be restored, introduce it in a separate reviewed PR with a non-privileged event, read-only execution against untrusted PR content, no production secrets, and explicit operator-controlled publication/deployment gates.
+
+
+The dedicated read-only `.github/workflows/workflow-boundary.yml` workflow runs the regression suite on pull requests that change workflow files or the policy test itself. It has no secrets, registry access, or write permissions.
