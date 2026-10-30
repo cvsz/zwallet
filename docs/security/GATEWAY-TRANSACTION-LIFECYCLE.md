@@ -38,3 +38,21 @@ Do not set the flag in production. Remove it after the test session. No producti
 ## Rollback
 
 If a test-only workflow needs to be reverted, revert the source commit through a reviewed PR. Never restore these simulation routes in a production runtime; the production denial and owner check are safety invariants.
+
+
+## Sandbox MPC and Account-Abstraction APIs
+
+The gateway's current MPC and account-abstraction routes are sandbox stubs backed by `SandboxMpcProvider` and `InMemoryBundlerClient`; they do not perform production MPC signing or submit a real UserOperation. The following routes must fail closed with HTTP 503 and `Cache-Control: no-store` unless both conditions hold:
+
+- `NODE_ENV` is explicitly `development` or `test`.
+- `WALLET_ENABLE_SANDBOX_MPC_AA=true` is explicitly configured.
+
+This guard applies before audit writes or status reads to:
+
+- `POST /v1/mpc/sign-transaction`
+- `POST /v1/aa/user-operations`
+- `GET /v1/aa/user-operations/:userOpHash/status`
+
+Production, staging, unset, and unknown runtime modes remain denied even when the opt-in flag is present. Never treat the sandbox response `initiated`, synthetic `0xop_...` identifiers, or in-memory status as proof of signing, bundler submission, or on-chain confirmation.
+
+For rollback, revert only through a reviewed PR. Do not restore sandbox MPC/AA routes in production; keep the denial in place until a real provider, durable operation state, chain receipt verification, and independent security review are implemented.
