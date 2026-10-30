@@ -105,12 +105,24 @@ export class GatewayStateStore {
     const userId = randomUUID();
     const script = `
       if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+      if redis.call('EXISTS', KEYS[2]) == 1 then
+        return redis.error_reply('device_binding_conflict')
+      end
+      redis.call('HSET', KEYS[2], ARGV[4], '1')
       redis.call('HSET', KEYS[1], 'id', ARGV[1], 'email', ARGV[2], 'password_hash', ARGV[3])
       return 1
     `;
-    const created = Number(await this.redis.eval(script, 1, `user:${email}`, userId, email, passwordHash)) === 1;
+    const created = Number(await this.redis.eval(
+      script,
+      2,
+      `user:${email}`,
+      `devices:${userId}`,
+      userId,
+      email,
+      passwordHash,
+      deviceId,
+    )) === 1;
     if (!created) return null;
-    await this.redis.hset(`devices:${userId}`, deviceId, '1');
     return { id: userId, email };
   }
 
