@@ -62,8 +62,8 @@ describe('authenticated device binding', () => {
     await app.close();
   });
 
-  it('allows an access-token holder to bind only their own additional device', async () => {
-    const { app } = await createTestApp();
+  it('allows an access-token holder to bind only their own additional device and audits a digest', async () => {
+    const { app, cache } = await createTestApp();
     const accessToken = await registerAndLogin(app);
     const claims = await app.jwt.verify(accessToken) as { sub: string };
 
@@ -80,6 +80,11 @@ describe('authenticated device binding', () => {
     expect(bind.statusCode).toBe(200);
     expect(bind.json()).toEqual({ bound: true });
     expect(bind.headers['cache-control']).toBe('no-store');
+
+    const auditEntries = await cache.lrange('audit:logs', 0, 10);
+    const bindAudit = auditEntries.map((entry: string) => JSON.parse(entry)).find((entry: any) => entry.action === 'auth.device.bind');
+    expect(bindAudit?.payload.deviceIdDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(bindAudit)).not.toContain('new-device-12345678');
 
     const login = await app.inject({
       method: 'POST',
