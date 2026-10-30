@@ -159,4 +159,51 @@ describe('security attack paths', () => {
     await app.close();
   });
 
+
+  it('scopes audit log reads to the authenticated user', async () => {
+    vi.stubEnv('JWT_SECRET', 'test-secret');
+    const cache = fakeRedis();
+    await cache.lpush('audit:logs', JSON.stringify({
+      id: 'audit-user-2',
+      action: 'card.issue',
+      userId: 'user-2',
+      payload: { cardId: 'card-user-2' },
+      createdAt: '2026-10-30T00:00:00.000Z',
+    }));
+    await cache.lpush('audit:logs', JSON.stringify({
+      id: 'audit-system',
+      action: 'system.maintenance',
+      userId: undefined,
+      payload: { detail: 'internal' },
+      createdAt: '2026-10-30T00:00:00.000Z',
+    }));
+    await cache.lpush('audit:logs', JSON.stringify({
+      id: 'audit-user-1',
+      action: 'wallet.read',
+      userId: 'user-1',
+      payload: { walletId: 'wallet-user-1' },
+      createdAt: '2026-10-30T00:00:00.000Z',
+    }));
+
+    const app = buildApp({ rateLimiter: cache as any, cache: cache as any });
+    await app.ready();
+    const token = await app.jwt.sign({ sub: 'user-1', deviceId: 'device-1', typ: 'access' });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/audit-logs',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'x-nonce': 'audit-user-scope',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().items).toHaveLength(1);
+    expect(response.json().items[0].userId).toBe('user-1');
+    expect(JSON.stringify(response.json())).not.toContain('card-user-2');
+    expect(JSON.stringify(response.json())).not.toContain('internal');
+
+    await app.close();
+  });
+
 });
