@@ -128,23 +128,22 @@ export class GatewayStateStore {
     const [id, storedEmail, passwordHash, legacyPassword] = fields;
     if (!id) return null;
 
-    if (passwordHash && legacyPassword !== null) {
-      const cleanup = `
-        if redis.call('HGET', KEYS[1], 'password_hash') then
-          redis.call('HDEL', KEYS[1], 'password')
-          return 1
-        end
-        return 0
-      `;
-      await this.redis.eval(cleanup, 1, key);
-    }
-
     return {
       id,
       email: storedEmail ?? email,
       passwordHash,
-      legacyPassword: passwordHash ? null : legacyPassword,
+      legacyPassword,
     };
+  }
+
+  async removeLegacyPasswordAfterHashAuthentication(email: string, expectedPasswordHash: string): Promise<boolean> {
+    if (!expectedPasswordHash) return false;
+    const script = `
+      if redis.call('HGET', KEYS[1], 'password_hash') ~= ARGV[1] then return 0 end
+      redis.call('HDEL', KEYS[1], 'password')
+      return 1
+    `;
+    return Number(await this.redis.eval(script, 1, `user:${email}`, expectedPasswordHash)) === 1;
   }
 
   async migrateLegacyPassword(email: string, legacyPassword: string, passwordHash: string): Promise<boolean> {
