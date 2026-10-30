@@ -149,6 +149,81 @@ describe('card and KYC admission boundaries', () => {
     );
   });
 
+  it.each([301, 302, 307, 308])(
+    'does not follow KYC provider redirects or forward the API key to another origin (%i)',
+    async (status) => {
+      providerFetch.mockResolvedValue(new Response(null, {
+        status,
+        headers: { location: 'https://attacker.example/collect' },
+      }));
+      const service = new KycService('https://kyc.example/api/v1', 'provider-test-key');
+
+      await expect(service.start({ userId: USER_A, country: 'TH' })).rejects.toThrow('KYC_PROVIDER_REDIRECT_DENIED');
+
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+      const [requestUrl, requestInit] = providerFetch.mock.calls[0] as unknown as [URL, RequestInit];
+      expect(new URL(String(requestUrl)).origin).toBe('https://kyc.example');
+      expect(requestInit.redirect).toBe('manual');
+      expect(requestInit.signal).toBeInstanceOf(AbortSignal);
+    },
+  );
+
+  it.each([301, 302, 307, 308])(
+    'does not follow issuer redirects with a bearer credential (%i)',
+    async (status) => {
+      providerFetch.mockResolvedValue(new Response(null, {
+        status,
+        headers: { location: 'https://attacker.example/collect' },
+      }));
+      const service = new CardOrchestrator(
+        'https://issuer.example/api/v1',
+        'issuer-provider-test-key',
+        {} as any,
+        {} as any,
+      );
+
+      await expect(service.issueCard({
+        userId: USER_A,
+        kycLevel: 'full',
+        type: 'virtual',
+        currency: 'USD',
+      })).rejects.toThrow('ISSUER_REDIRECT_DENIED');
+
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+      const [requestUrl, requestInit] = providerFetch.mock.calls[0] as unknown as [URL, RequestInit];
+      expect(new URL(String(requestUrl)).href).toBe('https://issuer.example/api/v1/cards');
+      expect(requestInit.redirect).toBe('manual');
+      expect(requestInit.signal).toBeInstanceOf(AbortSignal);
+    },
+  );
+
+  it('rejects unsafe issuer URLs before sending a bearer credential', async () => {
+    const unsafeIssuerUrls = [
+      'http://issuer.example',
+      'https://user:password@issuer.example',
+      'https://issuer.example?tenant=other',
+      'https://issuer.example/#fragment',
+      'file:///etc/passwd',
+    ];
+
+    for (const issuerBase of unsafeIssuerUrls) {
+      const service = new CardOrchestrator(
+        issuerBase,
+        'issuer-provider-test-key',
+        {} as any,
+        {} as any,
+      );
+      await expect(service.issueCard({
+        userId: USER_A,
+        kycLevel: 'full',
+        type: 'virtual',
+        currency: 'USD',
+      })).rejects.toThrow('ISSUER_UNAVAILABLE');
+    }
+
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
   it('requires an explicit level for an approved KYC webhook event', () => {
     const service = new KycService('https://kyc-provider.invalid', 'test-key');
     expect(() => service.webhookUpdate({

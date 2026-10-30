@@ -44,7 +44,7 @@ export class CardOrchestrator {
   }
 
   async freeze(cardId: string) {
-    await this.callIssuer(`/cards/${cardId}/freeze`, undefined, 'POST');
+    await this.callIssuer(`/cards/${encodeURIComponent(cardId)}/freeze`, undefined, 'POST');
     return true;
   }
 
@@ -58,11 +58,41 @@ export class CardOrchestrator {
     ) {
       throw new Error('ISSUER_UNAVAILABLE');
     }
-    const res = await fetch(`${this.issuerBase}${path}`, {
+
+    let issuerUrl: URL;
+    try {
+      const baseUrl = new URL(this.issuerBase);
+      const isLoopback = ['localhost', '127.0.0.1', '[::1]'].includes(baseUrl.hostname);
+      const localTestRuntime = ['development', 'test'].includes(process.env.NODE_ENV ?? '');
+      if (
+        !['https:', 'http:'].includes(baseUrl.protocol) ||
+        baseUrl.username ||
+        baseUrl.password ||
+        baseUrl.search ||
+        baseUrl.hash ||
+        (baseUrl.protocol !== 'https:' && !(isLoopback && localTestRuntime))
+      ) {
+        throw new Error('ISSUER_UNAVAILABLE');
+      }
+
+      const baseHref = baseUrl.href.endsWith('/') ? baseUrl.href : `${baseUrl.href}/`;
+      issuerUrl = new URL(path.replace(/^\/+/, ''), baseHref);
+      if (issuerUrl.origin !== baseUrl.origin) throw new Error('ISSUER_UNAVAILABLE');
+    } catch {
+      throw new Error('ISSUER_UNAVAILABLE');
+    }
+
+    const res = await fetch(issuerUrl, {
       method,
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
       body: payload ? JSON.stringify(payload) : undefined,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
     });
+    if (res.status >= 300 && res.status < 400) {
+      if (res.body) await res.body.cancel().catch(() => undefined);
+      throw new Error('ISSUER_REDIRECT_DENIED');
+    }
     if (!res.ok) throw new Error(`ISSUER_ERROR_${res.status}`);
     return res.json();
   }

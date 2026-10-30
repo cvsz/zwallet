@@ -7,6 +7,8 @@ const KycWebhook = z.object({
   level: z.enum(['basic', 'full']).optional(),
 });
 
+const PROVIDER_REQUEST_TIMEOUT_MS = 5_000;
+
 export class KycService {
   constructor(private readonly providerBase: string, private readonly apiKey: string) {}
 
@@ -46,7 +48,13 @@ export class KycService {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'X-API-Key': this.apiKey },
       body: JSON.stringify(req),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS),
     });
+    if (res.status >= 300 && res.status < 400) {
+      if (res.body) await res.body.cancel().catch(() => undefined);
+      throw new Error('KYC_PROVIDER_REDIRECT_DENIED');
+    }
     if (!res.ok) throw new Error('KYC_START_FAIL');
     return res.json();
   }
