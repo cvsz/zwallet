@@ -2,6 +2,6 @@ packages:
   - 'apps/*'
   - 'services/*'
   - 'packages/*'
-  - 'zwallet/backend/services/*'
-  - 'zwallet/backend/packages/*'
-  - 'zwallet/packages/*'
+
+# The backend/ directory is a separately locked npm workspace.
+# Its dependency graph is verified by .github/workflows/backend-workspace-ci.yml.
