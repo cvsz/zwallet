@@ -163,7 +163,7 @@ export const buildApp = (deps: Deps = {}) => {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
     if (
-      process.env.NODE_ENV === 'production' ||
+      !['development', 'test'].includes(process.env.NODE_ENV ?? '') ||
       process.env.WALLET_ENABLE_TRANSACTION_LIFECYCLE_SIMULATION !== 'true'
     ) {
       return reply

@@ -76,6 +76,34 @@ describe('e2e: create wallet, send transaction, swap token', () => {
     await app.close();
   });
 
+  it('denies simulation when NODE_ENV is missing even if explicitly enabled', async () => {
+    vi.stubEnv('NODE_ENV', '');
+    vi.stubEnv('WALLET_ENABLE_TRANSACTION_LIFECYCLE_SIMULATION', 'true');
+    process.env.JWT_SECRET = 'test-secret';
+    const app = buildApp({ rateLimiter: fakeRedis() as any, cache: fakeRedis() as any });
+    await app.ready();
+    const token = await app.jwt.sign({ sub: 'user-1', deviceId: 'device-1', typ: 'access' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/transactions/lifecycle',
+      headers: { authorization: `Bearer ${token}`, 'x-nonce': 'simulation-runtime-required' },
+      payload: {
+        chain: 'evm',
+        from: '0xsender',
+        to: '0xreceiver',
+        value: '10',
+        signatureHex: 'abcdef123456',
+      },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'transaction_lifecycle_simulation_disabled' });
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(store.balances.size).toBe(0);
+    await app.close();
+  });
+
   it('runs wallet -> transaction -> swap flow', async () => {
     process.env.JWT_SECRET = 'test-secret';
     const app = buildApp({ rateLimiter: fakeRedis() as any, cache: fakeRedis() as any });
