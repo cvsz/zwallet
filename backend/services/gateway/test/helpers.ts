@@ -8,20 +8,91 @@ export const fakeRedis = () => {
 
   return {
     get: async (k: string) => map.get(k) ?? counter.get(k)?.toString() ?? null,
-    set: async (k: string, v: string, mode?: string, duration?: string) => {
-      if (mode === 'EX' || mode === 'PX') {
-        // Simple mock: if it exists, it's a "lock failure" for some patterns,
-        // but here withIdempotency uses set(key, '1', 'EX', ttl) as a lock.
-        // In ioredis, set(k, v, 'EX', t, 'NX') returns 'OK' or null.
-        // The current state-store uses set(k, '1', 'EX', ttl) without NX.
-        // Actually line 28 in state-store.ts: await this.redis.set(`idem:${key}:lock`, '1', 'EX', String(ttlSec));
-        // It doesn't use NX! So it always succeeds unless it's a different implementation.
-        // Wait, if it doesn't use NX, it's not a lock.
+    set: async (k: string, v: string, _mode?: string, _duration?: string, condition?: string) => {
+      if (condition === 'NX' && (map.has(k) || counter.has(k) || hashes.has(k) || lists.has(k))) {
+        return null;
       }
       map.set(k, v);
       return 'OK';
     },
     setex: async (k: string, _s: number, v: string) => { map.set(k, v); return 'OK'; },
+    eval: async (script: string, numKeys: number, ...args: string[]) => {
+      const keys = args.slice(0, numKeys);
+      const argv = args.slice(numKeys);
+
+      if (script.includes('IDEMPOTENCY_CLAIM_V1')) {
+        const [lockKey, resultKey, fingerprintKey] = keys;
+        const [ownerToken, fingerprint] = argv;
+        const existing = map.get(resultKey);
+        if (existing !== undefined) {
+          return map.get(fingerprintKey) === fingerprint
+            ? ['REPLAY', existing]
+            : ['CONFLICT'];
+        }
+        if (map.has(lockKey)) {
+          const storedFingerprint = map.get(fingerprintKey);
+          return storedFingerprint !== undefined && storedFingerprint !== fingerprint
+            ? ['CONFLICT']
+            : ['BUSY'];
+        }
+        map.set(lockKey, ownerToken);
+        map.set(fingerprintKey, fingerprint);
+        return ['CLAIMED'];
+      }
+
+      if (script.includes('IDEMPOTENCY_COMPLETE_V1')) {
+        const [lockKey, resultKey] = keys;
+        const [ownerToken, serialized] = argv;
+        if (map.get(lockKey) !== ownerToken) return 0;
+        map.set(resultKey, serialized);
+        map.delete(lockKey);
+        return 1;
+      }
+
+      if (numKeys === 2 && argv.length === 4) {
+        const [userKey, devicesKey] = keys;
+        if (hashes.has(userKey)) return 0;
+        if (hashes.has(devicesKey)) throw new Error('device_binding_conflict');
+        const [id, email, passwordHash, deviceId] = argv;
+        const user = new Map<string, string>();
+        user.set('id', id);
+        user.set('email', email);
+        user.set('password_hash', passwordHash);
+        const devices = new Map<string, string>();
+        devices.set(deviceId, '1');
+        hashes.set(devicesKey, devices);
+        hashes.set(userKey, user);
+        return 1;
+      }
+
+      const key = keys[0];
+      if (numKeys === 1 && argv.length === 3) {
+        if (hashes.has(key)) return 0;
+        const [id, email, passwordHash] = argv;
+        const h = new Map<string, string>();
+        h.set('id', id);
+        h.set('email', email);
+        h.set('password_hash', passwordHash);
+        hashes.set(key, h);
+        return 1;
+      }
+      if (argv.length === 2) {
+        const [legacyPassword, passwordHash] = argv;
+        const h = hashes.get(key);
+        if (!h || h.has('password_hash') || h.get('password') !== legacyPassword) return 0;
+        h.set('password_hash', passwordHash);
+        h.delete('password');
+        return 1;
+      }
+      if (argv.length === 1) {
+        const [expectedHash] = argv;
+        const h = hashes.get(key);
+        if (!h || h.get('password_hash') !== expectedHash) return 0;
+        h.delete('password');
+        return 1;
+      }
+      return 0;
+    },
     incr: async (k: string) => { const n = (counter.get(k) ?? 0) + 1; counter.set(k, n); return n; },
     expire: async () => 1,
     del: async (k: string) => { const existed = map.has(k) || counter.has(k); map.delete(k); counter.delete(k); return existed ? 1 : 0; },
@@ -34,6 +105,7 @@ export const fakeRedis = () => {
       return args.length / 2;
     },
     hget: async (k: string, f: string) => hashes.get(k)?.get(f) ?? null,
+    hmget: async (k: string, ...fields: string[]) => fields.map((field) => hashes.get(k)?.get(field) ?? null),
     lpush: async (k: string, v: string) => {
       let l = lists.get(k);
       if (!l) { l = []; lists.set(k, l); }

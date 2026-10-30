@@ -5,3 +5,4 @@ packages:
   - 'zwallet/backend/services/*'
   - 'zwallet/backend/packages/*'
   - 'zwallet/packages/*'
+  - 'backend/services/*'

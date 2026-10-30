@@ -7,6 +7,7 @@ import { createHash, createHmac, timingSafeEqual, randomUUID } from 'node:crypto
 import { RpcProviderPool } from './lib/rpc-provider-pool.js';
 import { InMemoryBundlerClient, UserOperationService } from './services/bundler.js';
 import { GatewayStateStore, type TxLifecycleState, type TxStep } from './services/state-store.js';
+import { hashPassword, verifyPassword } from './services/password.js';
 import { store } from './utils/store.js';
 import { mpcServiceConfigSchema, mpcRequestSchema, MpcSignerService, SandboxMpcProvider } from './services/mpc.js';
 import { RiskEngine } from './services/risk/risk-engine.js';
@@ -53,7 +54,53 @@ export const buildApp = (deps: Deps = {}) => {
     return reply.code(500).send({ error: 'Internal server error' });
   });
   app.get('/health', async () => ({ service: 'gateway', status: 'ok' }));
-  app.post('/v1/auth/register', async (req, reply) => { const parsed = registerSchema.safeParse(req.body); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() }); const { result } = await state.withIdempotency(`auth:register:${parsed.data.email}`, 300, async () => { const user = await state.createUser(parsed.data.email, parsed.data.password, parsed.data.deviceId); await state.appendAudit('auth.register', user.id, parsed.data as any); return { userId: user.id }; }); return reply.send(result); });
+  app.post('/v1/auth/register', async (req, reply) => {
+    const parsed = registerSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const suppliedIdempotencyKey = req.headers['idempotency-key'];
+    if (
+      suppliedIdempotencyKey !== undefined &&
+      (typeof suppliedIdempotencyKey !== 'string' ||
+        !/^[A-Za-z0-9._:-]{1,128}$/.test(suppliedIdempotencyKey))
+    ) {
+      return reply.code(400).send({ error: 'invalid_idempotency_key' });
+    }
+    const requestKey = typeof suppliedIdempotencyKey === 'string' ? suppliedIdempotencyKey : randomUUID();
+    const idempotencyDigest = createHash('sha256')
+      .update(`${parsed.data.email}\0${requestKey}`)
+      .digest('hex');
+    const fingerprintSecret = process.env.IDEMPOTENCY_FINGERPRINT_SECRET ?? process.env.JWT_SECRET;
+    if (!fingerprintSecret) return reply.code(503).send({ error: 'idempotency_unavailable' });
+    const requestFingerprint = createHmac('sha256', fingerprintSecret)
+      .update('zwallet:registration-idempotency:v1:')
+      .update(JSON.stringify({
+        email: parsed.data.email,
+        password: parsed.data.password,
+        deviceId: parsed.data.deviceId,
+      }))
+      .digest('hex');
+
+    try {
+      const { result } = await state.withIdempotency(`auth:register:${idempotencyDigest}`, 300, async () => {
+        const passwordHash = await hashPassword(parsed.data.password);
+        const user = await state.createUser(parsed.data.email, passwordHash, parsed.data.deviceId);
+        if (!user) return { conflict: true as const };
+        await state.appendAudit('auth.register', user.id, { email: parsed.data.email, deviceId: parsed.data.deviceId });
+        return { conflict: false as const, userId: user.id };
+      }, requestFingerprint);
+      if (result.conflict) return reply.code(409).send({ error: 'account_already_exists' });
+      return reply.send({ userId: result.userId });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'idempotency_payload_conflict') {
+        return reply.code(409).send({ error: 'idempotency_key_reused' });
+      }
+      if (error instanceof Error && error.message === 'idempotency_conflict') {
+        return reply.code(409).send({ error: 'registration_in_progress' });
+      }
+      throw error;
+    }
+  });
 
   app.post('/v1/auth/device/bind', async (req, reply) => { const parsed = deviceBindSchema.safeParse(req.body); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() }); await state.bindDevice((parsed.data as any).userId, (parsed.data as any).deviceId); return { bound: true }; });
   app.post('/v1/auth/refresh', async (req: FastifyRequest, reply: FastifyReply) => {
@@ -65,7 +112,12 @@ export const buildApp = (deps: Deps = {}) => {
       return reply.code(401).send({ error: 'Invalid refresh token' });
     }
   });
-  app.post('/v1/auth/login', async (req, reply) => { const parsed = loginSchema.safeParse(req.body); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() }); const user = await state.getUser((parsed.data as any).email); if (!user || user.password !== (parsed.data as any).password) return reply.code(401).send({ error: 'Invalid credentials' }); if (!(await state.hasDevice(user.id, (parsed.data as any).deviceId))) return reply.code(403).send({ error: 'Unbound device' }); const tokens = await (app as any).mintTokens(user.id, (parsed.data as any).deviceId); await state.appendAudit('auth.login', user.id, { deviceId: (parsed.data as any).deviceId }); return tokens; });
+  app.post('/v1/auth/login', async (req, reply) => { const parsed = loginSchema.safeParse(req.body); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() }); const email = parsed.data.email; const password = parsed.data.password; let user = await state.getUser(email); if (!user) return reply.code(401).send({ error: 'Invalid credentials' }); let authenticated = false; if (user.passwordHash) {
+      authenticated = await verifyPassword(password, user.passwordHash);
+      if (authenticated && user.legacyPassword !== null && user.legacyPassword !== undefined) {
+        await state.removeLegacyPasswordAfterHashAuthentication(email, user.passwordHash);
+      }
+    } else if (user.legacyPassword !== null && user.legacyPassword !== undefined && user.legacyPassword === password) { const upgradedHash = await hashPassword(password); await state.migrateLegacyPassword(email, password, upgradedHash); user = await state.getUser(email); authenticated = Boolean(user?.passwordHash && await verifyPassword(password, user.passwordHash)); } if (!authenticated || !user) return reply.code(401).send({ error: 'Invalid credentials' }); if (!(await state.hasDevice(user.id, parsed.data.deviceId))) return reply.code(403).send({ error: 'Unbound device' }); const tokens = await (app as any).mintTokens(user.id, parsed.data.deviceId); await state.appendAudit('auth.login', user.id, { deviceId: parsed.data.deviceId }); return tokens; });
   app.post('/v1/wallet-metadata', { preHandler: [authGuard] }, async (req: FastifyRequest, reply: FastifyReply) => { const parsed = walletMetadataSchema.safeParse(req.body); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() }); const item = { id: randomUUID(), userId: (req.user as any).sub, ...parsed.data }; store.wallets.push(item); store.audit.push({ action: 'wallet.create', userId: (req.user as any).sub, payload: item }); return item; });
   app.post('/v1/transactions/index', { preHandler: [authGuard] }, async (req: FastifyRequest, reply: FastifyReply) => { const parsed = txIndexSchema.safeParse(req.body); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() }); const entry = { ...parsed.data, indexedAt: new Date().toISOString() }; store.txIndex.push(entry); store.audit.push({ action: 'tx.index', userId: (req.user as any).sub, payload: entry }); return { indexed: true, entry }; });
   app.post('/v1/swaps/orchestrate', { preHandler: [authGuard] }, async (req: FastifyRequest, reply: FastifyReply) => { 
