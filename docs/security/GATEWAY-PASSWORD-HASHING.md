@@ -8,7 +8,7 @@ The gateway must never write new plaintext passwords to Redis or include passwor
 - Password inputs are limited to 8–1024 characters before scrypt work begins to bound CPU/memory use from oversized requests.
 - Authentication verifies hashes using constant-time comparison.
 - Existing legacy records are upgraded only after a successful password check. A Redis Lua compare-and-set writes the hash and removes the legacy `password` field atomically.
-- Credential fields are read together with `HMGET`; if a record already has both a hash and a legacy plaintext field, the plaintext field is removed atomically.
+- Credential fields are read together with `HMGET`; a legacy plaintext field is retained until a successful scrypt verification. The login path then uses a Redis Lua compare-and-delete that removes the field only if the stored hash still equals the exact hash that was verified.
 - Failed login attempts do not migrate or modify legacy credentials.
 - Registration audit events contain only the email and device identifier; they never include the submitted password.
 - The root pnpm workspace includes `backend/services/*` so gateway tests and the TypeScript build are part of CI.
@@ -16,7 +16,7 @@ The gateway must never write new plaintext passwords to Redis or include passwor
 
 ## Compatibility and rollout
 
-This is a backward-compatible, lazy migration for existing Redis records. Users with legacy records can continue to sign in; the first successful sign-in upgrades that record. Passwords longer than 1024 characters are rejected by both registration and login. Legacy records for inactive users may still contain plaintext until they sign in or an operator performs an approved migration.
+This is a backward-compatible, lazy migration for existing Redis records. Users with legacy-only records can sign in and atomically upgrade to a scrypt hash. For records that already contain both a hash and legacy plaintext, the plaintext is removed only after successful verification of that hash. A malformed or unverifiable hash fails authentication and leaves the legacy value untouched for an operator-approved recovery; the login path never falls back to plaintext when a hash exists. Passwords longer than 1024 characters are rejected by both registration and login. Legacy records for inactive users may still contain plaintext until they sign in or an operator performs an approved migration.
 
 Before production admission:
 
@@ -51,6 +51,7 @@ The gateway regression tests and real-Redis integration tests are committed on t
 ## Registration integrity and idempotency
 
 - Account creation uses a Redis Lua guard to refuse an existing `user:<email>` record; it never replaces the existing user ID or password hash.
+- The user hash and initial device binding are created by one two-key Redis Lua script. An existing email is rejected without binding another device; an existing device-key collision fails before either write.
 - A duplicate registration with a different request key returns HTTP 409 (`account_already_exists`).
 - Clients may supply `Idempotency-Key` (1–128 characters from `A-Z a-z 0-9 . _ : -`) to replay a completed registration result safely. The keyed HMAC request fingerprint binds the key to the validated email, password, and device ID; configure `IDEMPOTENCY_FINGERPRINT_SECRET` through the approved secret manager (the existing `JWT_SECRET` is a compatibility fallback). Reusing the same key with a different payload returns HTTP 409 (`idempotency_key_reused`).
 - The Redis Lua claim is atomic and uses an owner token. In-flight claims have no TTL, so a callback that outlives the result TTL cannot be duplicated. If a callback fails ambiguously, the claim remains blocked until an operator reconciles the side effect; do not clear it blindly.
