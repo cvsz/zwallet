@@ -16,6 +16,10 @@ import { KycService } from './services/compliance/kyc-service.js';
 
 type Deps = { rateLimiter?: { incr: (k: string) => Promise<number>; expire: (k: string, s: number) => Promise<number> }; cache?: { get: (k: string) => Promise<string | null>; setex: (k: string, s: number, v: string) => Promise<unknown> } };
 
+const isLifecycleSimulationEnabled = () =>
+  ['development', 'test'].includes(process.env.NODE_ENV ?? '') &&
+  process.env.WALLET_ENABLE_TRANSACTION_LIFECYCLE_SIMULATION === 'true';
+
 export const buildApp = (deps: Deps = {}) => {
   const app = Fastify({ logger: false });
   const redis = deps.rateLimiter && deps.cache ? null : new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', { lazyConnect: true });
@@ -162,10 +166,7 @@ export const buildApp = (deps: Deps = {}) => {
     const parsed = lifecycleCreateSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
-    if (
-      !['development', 'test'].includes(process.env.NODE_ENV ?? '') ||
-      process.env.WALLET_ENABLE_TRANSACTION_LIFECYCLE_SIMULATION !== 'true'
-    ) {
+    if (!isLifecycleSimulationEnabled()) {
       return reply
         .code(503)
         .header('cache-control', 'no-store')
@@ -250,8 +251,15 @@ export const buildApp = (deps: Deps = {}) => {
   });
 
   app.get('/v1/transactions/lifecycle/:txId', { preHandler: [authGuard] }, async (req: any, reply) => {
+    if (!isLifecycleSimulationEnabled()) {
+      return reply
+        .code(503)
+        .header('cache-control', 'no-store')
+        .send({ error: 'transaction_lifecycle_simulation_disabled' });
+    }
+
     const tx = await state.readTxLifecycle(req.params.txId);
-    if (!tx) return reply.code(404).send({ error: 'not_found' });
+    if (!tx || tx.userId !== req.user.sub) return reply.code(404).send({ error: 'not_found' });
     return { txId: req.params.txId, state: tx };
   });
 
