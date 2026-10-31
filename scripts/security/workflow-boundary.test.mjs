@@ -56,3 +56,19 @@ test("workflow boundary gate pins checkout to a full commit SHA", () => {
   assert.equal(references.length, 1, "expected exactly one checkout action");
   assert.match(references[0][1], /^[0-9a-f]{40}$/);
 });
+
+test("trust-boundary documentation matches the read-only workflow implementation", () => {
+  const documentation = readFileSync(
+    join(ROOT, "docs", "security", "GITHUB-ACTIONS-TRUST-BOUNDARY.md"),
+    "utf8",
+  );
+  const workflow = readWorkflow("codex-pr-gate.yml");
+
+  assert.match(workflow, /^name:\s*Workflow Boundary Contract$/m);
+  assert.match(documentation, /read-only workflow contract test/i);
+  assert.match(documentation, /does not invoke Codex/i);
+  assert.match(documentation, /does not reference repository secrets/i);
+  assert.doesNotMatch(documentation, /The remaining Codex PR gate/);
+  assert.doesNotMatch(documentation, /uses the `:read-only` Codex permission profile/);
+  assert.doesNotMatch(documentation, /transports the model result through an environment variable/);
+});
