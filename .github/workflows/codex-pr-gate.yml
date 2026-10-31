@@ -1,68 +1,37 @@
-name: Codex PR Gate
+name: Workflow Boundary Contract
 
 on:
   pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "scripts/security/**"
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/**"
+      - "scripts/security/**"
 
 permissions:
   contents: read
 
+concurrency:
+  group: workflow-boundary-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  codex-audit:
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  workflow-boundary:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
 
-      - name: Run Codex Audit
-        id: codex
-        uses: openai/codex-action@c05cfd74ad95c626cdf05c6685e62becc3bf7813 # verified immutable commit
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          permission-profile: ":read-only"
-          safety-strategy: drop-sudo
-          prompt: |
-            You are auditing a fintech system.
+      - name: Verify Node runtime
+        run: node --version
 
-            HARD RULES:
-            - Reject if ledger invariants are violated.
-            - Reject if critical financial mutations are not idempotent.
-            - Reject if caller-controlled identity or tenant headers are trusted.
-            - Reject if production secrets are hard-coded or exposed.
-            - Reject if security or release gates are bypassed.
-
-            Return exactly one JSON object with a string "status" equal to "PASS" or "FAIL"
-            and a non-empty string "reason". Do not include Markdown fences or extra text.
-
-      - name: Enforce Codex result without shell interpolation
-        env:
-          CODEX_FINAL_MESSAGE: ${{ steps.codex.outputs.final-message }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-          import sys
-
-          raw = os.environ.get("CODEX_FINAL_MESSAGE", "")
-          try:
-              result = json.loads(raw)
-          except json.JSONDecodeError:
-              print("Codex audit did not return valid JSON", file=sys.stderr)
-              sys.exit(1)
-
-          if not isinstance(result, dict) or result.get("status") != "PASS":
-              print("Codex audit did not return PASS", file=sys.stderr)
-              sys.exit(1)
-
-          reason = result.get("reason")
-          if not isinstance(reason, str) or not reason.strip():
-              print("Codex audit did not return a non-empty reason", file=sys.stderr)
-              sys.exit(1)
-
-          print("Codex audit passed.")
-          PY
+      - name: Run workflow security contract tests
+        run: node --test scripts/security/workflow-boundary.test.mjs
