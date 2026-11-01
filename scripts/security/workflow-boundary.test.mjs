@@ -72,3 +72,34 @@ test("trust-boundary documentation matches the read-only workflow implementation
   assert.doesNotMatch(documentation, /uses the `:read-only` Codex permission profile/);
   assert.doesNotMatch(documentation, /transports the model result through an environment variable/);
 });
+
+test("DevOps CI/CD keeps PR validation read-only and production deployment operator-gated", () => {
+  const workflow = readWorkflow("cicd.yml");
+  const header = workflow.split(/^jobs:\\s*$/m, 1)[0];
+
+  assert.match(header, /^permissions:\\s*\\n\\s+contents:\\s*read\\s*$/m);
+  assert.doesNotMatch(header, /^\\s+(?:id-token|packages):\\s*write\\b/m);
+  assert.match(workflow, /^  workflow_dispatch:\\s*\\n    inputs:\\s*\\n      confirmation:/m);
+
+  const jobBody = (name) => {
+    const marker = `  ${name}:\\n`;
+    const start = workflow.indexOf(marker);
+    assert.notEqual(start, -1, `missing ${name} job`);
+    const rest = workflow.slice(start + marker.length);
+    const nextJob = rest.search(/^  [A-Za-z0-9_-]+:\\s*$/m);
+    return nextJob === -1 ? rest : rest.slice(0, nextJob);
+  };
+
+  const ci = jobBody("ci");
+  const build = jobBody("build-and-push");
+  const deploy = jobBody("deploy-blue-green");
+
+  assert.doesNotMatch(ci, /^\\s+id-token:\\s*write\\b|^\\s+packages:\\s*write\\b/m);
+  assert.match(build, /permissions:\\s*\\n\\s+contents:\\s*read\\n\\s+packages:\\s*write/m);
+  assert.match(deploy, /if: github\\.event_name == 'workflow_dispatch' && github\\.ref == 'refs\\/heads\\/main'/);
+  assert.match(deploy, /environment:\\s*production/);
+  assert.match(deploy, /permissions:\\s*\\n\\s+contents:\\s*read\\n\\s+id-token:\\s*write/m);
+  assert.match(deploy, /DEPLOY_CONFIRMATION/);
+  assert.match(deploy, /Missing explicit deployment confirmation/);
+  assert.match(deploy, /K8S_NAMESPACE must be configured/);
+});
