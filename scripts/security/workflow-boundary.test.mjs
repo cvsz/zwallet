@@ -115,3 +115,13 @@ test("workspace typecheck builds exported RPC declarations before consumers", ()
   assert.equal(rpcPackage.exports["."].types, "./dist/index.d.ts");
   assert.equal(rpcPackage.exports["."].default, "./dist/index.js");
 });
+
+test("RPC package explicitly emits declarations at its published types path", () => {
+  const rpcPackage = JSON.parse(readFileSync(join(ROOT, "packages", "rpc", "package.json"), "utf8"));
+  const rpcConfig = JSON.parse(readFileSync(join(ROOT, "packages", "rpc", "tsconfig.json"), "utf8"));
+
+  assert.equal(rpcPackage.types, "./dist/index.d.ts");
+  assert.equal(rpcPackage.exports["."].types, "./dist/index.d.ts");
+  assert.equal(rpcConfig.compilerOptions.declaration, true);
+  assert.equal(rpcConfig.compilerOptions.declarationDir, "dist");
+});
