@@ -103,3 +103,15 @@ test("DevOps CI/CD keeps PR validation read-only and production deployment opera
   assert.match(deploy, /Missing explicit deployment confirmation/);
   assert.match(deploy, /K8S_NAMESPACE must be configured/);
 });
+
+test("workspace typecheck builds exported RPC declarations before consumers", () => {
+  const rootPackage = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+  const rpcPackage = JSON.parse(readFileSync(join(ROOT, "packages", "rpc", "package.json"), "utf8"));
+
+  assert.equal(
+    rootPackage.scripts.typecheck,
+    "pnpm --filter @zwallet/rpc build && pnpm -r --if-present run typecheck",
+  );
+  assert.equal(rpcPackage.exports["."].types, "./dist/index.d.ts");
+  assert.equal(rpcPackage.exports["."].default, "./dist/index.js");
+});
