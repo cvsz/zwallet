@@ -36,12 +36,30 @@ The supply-chain workflow builds the API image locally, scans it with Trivy, gen
 
 Image publication and signing require a separate, reviewed, main-only release workflow with an exact source SHA, protected environment reviewers, digest verification, and accepted provenance. No registry publication or signing is performed by these PR-triggered validation workflows.
 
-## Separate production-deployment blocker
+## Production publication and deployment disabled in this candidate
 
-Main `.github/workflows/cicd.yml` still contains a push-to-main image publication path and a blue-green deployment job. Draft PR [#208](https://github.com/cvsz/zwallet/pull/208) proposes manual-only deployment admission, but it remains open and unmerged. This candidate does not disable or authorize the current Main deployment path.
+This candidate removes .github/workflows/cicd.yml entirely. The Main version of that workflow combines:
+- push-to-main GHCR image publication;
+- a blue-green EKS deployment path;
+- OIDC permission and cluster mutation steps.
 
-Keep production deployment blocked until PR #208 is reconciled with current Main, exact-head CI/security and independent review pass, effective Main and environment governance is verified, and an operator explicitly authorizes the release. This document does not claim that production deployment is contained.
+The candidate deliberately does not replace those paths with another deployment workflow. The remaining .github/workflows/ci.yml is the source-validation workflow, and .github/workflows/supply-chain.yml builds locally, scans, and uploads an SBOM without registry credentials or write permissions. This is fail-closed containment, not evidence that production deployment is ready.
+
+Main remains exposed until this candidate is reviewed and merged. Do not merge PR #217 until exact-head CI/security is executable and green, the candidate commit is signed, and independent review approves. Do not treat PR #208 as an alternate release path; it requires its own exact-head trust-boundary review.
+
+A future production release workflow must be introduced separately and must include:
+- protected Main and a protected Environment with required reviewers;
+- exact source SHA and immutable, verified action references;
+- narrowly scoped packages: write and id-token: write permissions;
+- image digest verification and signed provenance;
+- explicit operator confirmation;
+- non-default, allowlisted target namespace and verified cluster identity;
+- tested rollback and post-deployment health gates.
+
+## Chaos test execution boundary
+
+The pull-request workflow .github/workflows/chaos.yml is validation-only. It runs shell syntax validation and workflow contract tests; it does not execute tests/chaos/kill-pod.sh, invoke kubectl, or access cluster credentials. The script remains a potentially destructive operator tool and must not be run from pull-request automation. Any future chaos drill requires a separately reviewed manual workflow, a disposable non-production target, explicit context/namespace/pod allowlists, and an operator confirmation.
 
 ## Rollback
 
-Do not restore the removed privileged `workflow_run` auto-fix workflow or PR-triggered registry publication. If automation must be restored, introduce it in a separate reviewed PR with a non-privileged event, read-only execution against untrusted PR content, no production secrets, and explicit operator-controlled publication/deployment gates.
+Do not restore the removed privileged workflow_run auto-fix workflow, secret-bearing PR Codex workflow, PR-triggered registry publication, automatic Main-push publication, or automatic cluster mutation. If automation must be restored, introduce it in a separate reviewed PR with a non-privileged event, read-only execution against untrusted PR content, no production secrets, and explicit operator-controlled publication/deployment gates.
