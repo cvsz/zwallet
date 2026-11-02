@@ -33,7 +33,7 @@ test("no workflow uses the privileged workflow_run event", () => {
 test("supply-chain validation is local-only and read-only", () => {
   const workflow = readWorkflow("supply-chain.yml");
   assert.match(workflow, /permissions:\s*\n\s+contents:\s*read/m);
-  assert.doesNotMatch(workflow, /^\s*(?:packages|id-token):\s*write\b/m);
+      /^\s*(?:packages|id-token):\s*write\b/m,
   assert.doesNotMatch(workflow, /\bdocker\s+login\b|\bdocker\s+push\b|\bcosign\s+sign\b/i);
   assert.match(workflow, /docker build --pull --tag/);
   assert.match(workflow, /image-ref:\s*\$\{\{\s*env\.IMAGE_REF\s*\}\}/);
@@ -86,7 +86,7 @@ test("production publication and deployment remain disabled until a separately r
     );
     assert.doesNotMatch(
       workflow,
-      /\\bdocker\\s+push\\b|\\bkubectl\\s+(?:apply|delete|patch|drain|scale)\\b|docker\\/build-push-action/i,
+      /\bdocker\s+push\b|\bkubectl\s+(?:apply|delete|patch|drain|scale)\b|docker\/build-push-action/i,
       `${name} must not publish images or mutate a cluster`,
     );
   }
