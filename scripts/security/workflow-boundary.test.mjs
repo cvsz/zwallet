@@ -18,6 +18,21 @@ function activeYamlLines(source) {
     .join("\n");
 }
 
+
+function hasForbiddenWritePermission(source) {
+  return /^\s*(?:packages|id-token):\s*write\b/m.test(activeYamlLines(source));
+}
+
+test("permission guard rejects registry and OIDC write grants", () => {
+  assert.equal(hasForbiddenWritePermission("permissions:\n  packages: write\n"), true);
+  assert.equal(hasForbiddenWritePermission("permissions:\n  id-token: write\n"), true);
+  assert.equal(hasForbiddenWritePermission("permissions:\n  contents: read\n"), false);
+  assert.equal(
+    hasForbiddenWritePermission("# packages: write\npermissions:\n  contents: read\n"),
+    false,
+  );
+});
+
 test("no workflow uses the privileged workflow_run event", () => {
   const files = readdirSync(WORKFLOWS).filter((name) => /\.ya?ml$/i.test(name));
   for (const name of files) {
@@ -33,7 +48,7 @@ test("no workflow uses the privileged workflow_run event", () => {
 test("supply-chain validation is local-only and read-only", () => {
   const workflow = readWorkflow("supply-chain.yml");
   assert.match(workflow, /permissions:\s*\n\s+contents:\s*read/m);
-      /^\s*(?:packages|id-token):\s*write\b/m,
+  assert.equal(hasForbiddenWritePermission(workflow), false, "supply-chain workflow must not grant packages or id-token write permissions");
   assert.doesNotMatch(workflow, /\bdocker\s+login\b|\bdocker\s+push\b|\bcosign\s+sign\b/i);
   assert.match(workflow, /docker build --pull --tag/);
   assert.match(workflow, /image-ref:\s*\$\{\{\s*env\.IMAGE_REF\s*\}\}/);
@@ -74,14 +89,15 @@ test("trust-boundary documentation matches the read-only workflow implementation
 });
 
 test("production publication and deployment remain disabled until a separately reviewed release workflow exists", () => {
-  const names = readdirSync(WORKFLOWS).filter((name) => /\\.ya?ml$/i.test(name));
+  const names = readdirSync(WORKFLOWS).filter((name) => /\.ya?ml$/i.test(name));
+  assert.ok(names.length > 0, "expected workflow YAML files to be enumerated");
   assert.equal(existsSync(join(WORKFLOWS, "cicd.yml")), false);
 
   for (const name of names) {
     const workflow = activeYamlLines(readWorkflow(name));
-    assert.doesNotMatch(
-      workflow,
-      /^\\s*(?:packages|id-token):\\s*write\\b/m,
+    assert.equal(
+      hasForbiddenWritePermission(workflow),
+      false,
       `${name} must not grant registry or OIDC write permissions in this containment candidate`,
     );
     assert.doesNotMatch(
