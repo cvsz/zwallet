@@ -125,3 +125,19 @@ test("RPC package explicitly emits declarations at its published types path", ()
   assert.equal(rpcConfig.compilerOptions.declaration, true);
   assert.equal(rpcConfig.compilerOptions.declarationDir, "dist");
 });
+
+test("pull-request chaos workflow is validation-only and never mutates a cluster", () => {
+  const workflow = activeYamlLines(readWorkflow("chaos.yml"));
+
+  assert.match(workflow, /^name: Chaos Safety Contract$/m);
+  assert.match(workflow, /^  pull_request:/m);
+  assert.match(workflow, /permissions:\s*\n\s+contents:\s*read/m);
+  assert.match(workflow, /bash -n tests\/chaos\/kill-pod\.sh/);
+  assert.match(workflow, /persist-credentials:\s*false/);
+  assert.doesNotMatch(workflow, /bash\s+tests\/chaos\/kill-pod\.sh/);
+  assert.doesNotMatch(workflow, /kubectl\s+(?:delete|apply|patch|drain|scale)\b/i);
+  assert.doesNotMatch(workflow, /\$\{\{\s*secrets\./);
+  const checkouts = [...workflow.matchAll(/uses:\s*actions\/checkout@([^\s#]+)/g)];
+  assert.equal(checkouts.length, 1);
+  assert.match(checkouts[0][1], /^[0-9a-f]{40}$/);
+});
