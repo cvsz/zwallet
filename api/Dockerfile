@@ -13,6 +13,7 @@ ENV PIP_NO_CACHE_DIR=1 \
 WORKDIR /build
 
 RUN apt-get update \
+ && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends build-essential gcc \
  && rm -rf /var/lib/apt/lists/*
 
@@ -36,6 +37,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/venv/bin:$PATH"
 
 WORKDIR /app
+
+# Apply Debian security updates available for the pinned base digest/tag before
+# dropping privileges. This keeps Trivy's fixed OS CVEs from surviving merely
+# because the upstream slim image was published before the security repository
+# update landed.
+RUN apt-get update \
+ && apt-get upgrade -y \
+ && rm -rf /var/lib/apt/lists/*
 
 # non-root (no shell)
 RUN useradd -m -u 10001 -s /usr/sbin/nologin appuser

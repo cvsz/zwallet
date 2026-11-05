@@ -20,6 +20,15 @@ export function assertSigningAllowed(
   }
 
   if (
+    process.env.NODE_ENV === "production" &&
+    key.provider === "dev"
+  ) {
+    throw new Error(
+      "development signer is forbidden in production"
+    );
+  }
+
+  if (
     transfer.chain !== key.chain
   ) {
     throw new Error(
