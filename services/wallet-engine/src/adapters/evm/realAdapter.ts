@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { evmProvider } from "./rpc.js";
 import type { WalletTransferRecord } from "../../walletEngine.js";
 
@@ -17,13 +16,10 @@ export async function estimateRealEvmFee(transfer: WalletTransferRecord) {
   };
 }
 
-export async function broadcastRealEvmTransfer(transfer: WalletTransferRecord) {
-  const fee = await estimateRealEvmFee(transfer);
-
-  return {
-    txHash: "0x" + randomBytes(32).toString("hex"),
-    network: "ethereum",
-    simulated: true,
-    observedBlock: fee.observedBlock,
-  };
+export async function broadcastRealEvmTransfer(
+  _transfer: WalletTransferRecord
+): Promise<never> {
+  throw new Error(
+    "EVM broadcast is disabled until a real signer, signed-transaction broadcaster, and chain-finality reconciler are implemented"
+  );
 }
