@@ -15,7 +15,43 @@ import { OfframpService } from './services/liquidity/offramp-service.js';
 import { CardOrchestrator } from './services/card/card-orchestrator.js';
 import { KycService } from './services/compliance/kyc-service.js';
 
-type Deps = { rateLimiter?: { incr: (k: string) => Promise<number>; expire: (k: string, s: number) => Promise<number> }; cache?: { get: (k: string) => Promise<string | null>; setex: (k: string, s: number, v: string) => Promise<unknown> } };
+const CLAIM_ISSUER_AUTH_EVENT_LUA = [
+  "if redis.call('EXISTS', KEYS[1]) == 1 then",
+  "  return {0, 'replay'}",
+  "end",
+  "local existing = redis.call('GET', KEYS[2])",
+  "if existing then",
+  "  local nonceClaim = redis.call('SET', KEYS[1], '1', 'EX', ARGV[1], 'NX')",
+  "  if not nonceClaim then return {0, 'replay'} end",
+  "  return {2, existing}",
+  "end",
+  "local eventClaim = redis.call('SET', KEYS[2], ARGV[2], 'NX')",
+  "if not eventClaim then return {2, redis.call('GET', KEYS[2]) or ''} end",
+  "local nonceClaim = redis.call('SET', KEYS[1], '1', 'EX', ARGV[1], 'NX')",
+  "if not nonceClaim then",
+  "  redis.call('DEL', KEYS[2])",
+  "  return {0, 'replay'}",
+  "end",
+  "return {1, 'OK'}",
+].join('\n');
+
+type Deps = {
+  rateLimiter?: { incr: (k: string) => Promise<number>; expire: (k: string, s: number) => Promise<number> };
+  cache?: {
+    get: (k: string) => Promise<string | null>;
+    setex: (k: string, s: number, v: string) => Promise<unknown>;
+    set?: (k: string, v: string, ...args: string[]) => Promise<string | null>;
+    eval?: (script: string, numberOfKeys: number, ...args: Array<string | number>) => Promise<unknown>;
+  };
+};
+
+const isLifecycleSimulationEnabled = () =>
+  ['development', 'test'].includes(process.env.NODE_ENV ?? '') &&
+  process.env.WALLET_ENABLE_TRANSACTION_LIFECYCLE_SIMULATION === 'true';
+
+const isSandboxMpcAaEnabled = () =>
+  ['development', 'test'].includes(process.env.NODE_ENV ?? '') &&
+  process.env.WALLET_ENABLE_SANDBOX_MPC_AA === 'true';
 
 export const buildApp = (deps: Deps = {}) => {
   const app = Fastify({ logger: false });
@@ -29,8 +65,8 @@ export const buildApp = (deps: Deps = {}) => {
   const userOpService = new UserOperationService(new InMemoryBundlerClient());
   const riskEngine = new RiskEngine();
   const offrampService = new OfframpService((process.env.RFQ_ENDPOINTS ?? '').split(',').filter(Boolean), { credit: async () => undefined });
-  const cardOrchestrator = new CardOrchestrator(process.env.ISSUER_BASE ?? 'http://issuer.local', process.env.ISSUER_KEY ?? 'local-dev-key', riskEngine, offrampService);
-  const kycService = new KycService(process.env.KYC_PROVIDER_BASE ?? 'http://kyc-provider.local', process.env.KYC_PROVIDER_KEY ?? 'local-dev-key');
+  const cardOrchestrator = new CardOrchestrator(process.env.ISSUER_BASE ?? '', process.env.ISSUER_KEY ?? '', riskEngine, offrampService);
+  const kycService = new KycService(process.env.KYC_PROVIDER_BASE ?? '', process.env.KYC_PROVIDER_KEY ?? '');
 
   app.register(cors, { origin: true });
   if (redis) {
@@ -102,7 +138,18 @@ export const buildApp = (deps: Deps = {}) => {
     }
   });
 
-  app.post('/v1/auth/device/bind', async (req, reply) => { const parsed = deviceBindSchema.safeParse(req.body); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() }); await state.bindDevice((parsed.data as any).userId, (parsed.data as any).deviceId); return { bound: true }; });
+  app.post('/v1/auth/device/bind', { preHandler: [authGuard] }, async (req: any, reply) => {
+    const parsed = deviceBindSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    if (parsed.data.userId !== req.user.sub) {
+      return reply.code(403).header('cache-control', 'no-store').send({ error: 'user_mismatch' });
+    }
+
+    await state.bindDevice(req.user.sub, parsed.data.deviceId);
+    const deviceDigest = createHash('sha256').update(parsed.data.deviceId).digest('hex');
+    await state.appendAudit('auth.device.bind', req.user.sub, { deviceIdDigest: deviceDigest });
+    return reply.header('cache-control', 'no-store').send({ bound: true });
+  });
   app.post('/v1/auth/refresh', async (req: FastifyRequest, reply: FastifyReply) => {
     const parsed = refreshSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -163,19 +210,39 @@ export const buildApp = (deps: Deps = {}) => {
     return swap; 
   });
   app.get('/v1/prices/:symbol', { preHandler: [authGuard] }, async (req: FastifyRequest, reply: FastifyReply) => { const parsed = priceSchema.safeParse(req.params); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() }); const cacheKey = `price:${(parsed.data as any).symbol}`; const hit = await cache.get(cacheKey); if (hit) return { symbol: (parsed.data as any).symbol, price: Number(hit), source: 'cache' }; const quorumPrice = await rpcPool.call('eth_getBalance', [(parsed.data as any).symbol]) as { price: number }; const price = Number(quorumPrice.price.toFixed(2)); await cache.setex(cacheKey, 15, String(price)); await state.appendAudit('price.read', (req.user as any).sub, { symbol: (parsed.data as any).symbol, price }); return { symbol: (parsed.data as any).symbol, price, source: 'oracle' }; });
-  app.get('/v1/audit-logs', { preHandler: [authGuard] }, async () => ({ items: await state.readAudit() }));
+  app.get('/v1/audit-logs', { preHandler: [authGuard] }, async (req: any) => {
+    const authenticatedUserId = req.user.sub;
+    const items = await state.readAudit();
+    return { items: items.filter((item: any) => item.userId === authenticatedUserId) };
+  });
 
-  app.post('/v1/compliance/kyc/start', { preHandler: [authGuard] }, async (req: FastifyRequest, reply: FastifyReply) => {
+  app.post('/v1/compliance/kyc/start', { preHandler: [authGuard] }, async (req: any, reply) => {
     const parsed = kycStartSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    return kycService.start(parsed.data);
+    if (parsed.data.userId !== req.user.sub) {
+      return reply.code(403).send({ error: 'user_mismatch' });
+    }
+    try {
+      return await kycService.start({ ...parsed.data, userId: req.user.sub });
+    } catch {
+      return reply
+        .code(503)
+        .header('cache-control', 'no-store')
+        .send({ error: 'kyc_provider_unavailable' });
+    }
   });
 
   app.post('/v1/card/issue', { preHandler: [authGuard] }, async (req: any, reply) => {
     const parsed = cardIssueSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     if (parsed.data.userId !== req.user.sub) return reply.code(403).send({ error: 'user_mismatch' });
-    return cardOrchestrator.issueCard(parsed.data);
+
+    // The request's kycLevel is client-controlled. The current KYC adapter only starts
+    // provider applications; it has no verified, durable approval record to authorize issuance.
+    return reply
+      .code(503)
+      .header('cache-control', 'no-store')
+      .send({ error: 'kyc_approval_unavailable' });
   });
 
   app.post('/v1/webhooks/issuer/auth', async (req: any, reply) => {
@@ -187,32 +254,151 @@ export const buildApp = (deps: Deps = {}) => {
     const signature = req.headers['x-issuer-signature'];
     const nonce = req.headers['x-issuer-nonce'];
     if (!signature || !nonce) return reply.code(401).send({ error: 'missing_webhook_signature' });
-    const webhookSecret = process.env.ISSUER_WEBHOOK_SECRET ?? 'local-webhook-secret';
+    if (typeof nonce !== 'string' || nonce.length > 256 || /[\s\x00-\x1F\x7F]/.test(nonce)) {
+      return reply.code(400).send({ error: 'invalid_webhook_nonce' });
+    }
+    const webhookSecret = process.env.ISSUER_WEBHOOK_SECRET;
+    // Fail closed on missing, weak, padded, or control-character secrets. Do not log key material.
+    if (
+      !webhookSecret ||
+      webhookSecret !== webhookSecret.trim() ||
+      Buffer.byteLength(webhookSecret, 'utf8') < 32 ||
+      new Set(webhookSecret).size < 8 ||
+      /[\x00-\x1F\x7F]/.test(webhookSecret)
+    ) {
+      return reply.code(503).send({ error: 'webhook_unavailable' });
+    }
     const payload = JSON.stringify(req.body ?? {});
     const expected = createHmac('sha256', webhookSecret).update(`${String(nonce)}.${payload}`).digest('hex');
     const provided = String(signature);
     if (provided.length !== expected.length || !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) {
       return reply.code(401).send({ error: 'invalid_webhook_signature' });
     }
-    const nonceKey = `issuer:webhook:nonce:${String(nonce)}`;
-    const seen = await cache.get(nonceKey);
-    if (seen) return reply.code(409).send({ error: 'replay_detected' });
-    await cache.setex(nonceKey, 300, '1');
     const parsed = issuerAuthWebhookSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    return cardOrchestrator.handleAuth(parsed.data);
+
+    // Validate stable issuer identity before consuming the transport nonce.
+    // Otherwise a configuration error would lock out a legitimate provider retry.
+    const issuerIdentity = process.env.ISSUER_ID;
+    if (!issuerIdentity || issuerIdentity !== issuerIdentity.trim() || !/^[A-Za-z0-9._:-]{1,128}$/.test(issuerIdentity)) {
+      return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+    }
+
+    // The shared hash tag keeps both keys in one Redis Cluster slot for the Lua transaction.
+    const issuerKeyTag = '{' + issuerIdentity + '}';
+    const nonceKey = 'issuer:webhook:' + issuerKeyTag + ':nonce:' + String(nonce);
+    const authEventPayloadHash = createHash('sha256')
+      .update(JSON.stringify(parsed.data))
+      .digest('hex');
+    const authEventFingerprint = createHash('sha256')
+      .update(issuerIdentity + '\u0000' + parsed.data.authId)
+      .digest('hex');
+    const authEventKey = 'issuer:webhook:' + issuerKeyTag + ':auth:' + authEventFingerprint;
+    const processingRecord = JSON.stringify({
+      status: 'processing',
+      payloadHash: authEventPayloadHash,
+      startedAt: new Date().toISOString(),
+    });
+
+    if (typeof cache.eval !== 'function') {
+      return reply.code(503).send({ error: 'webhook_replay_protection_unavailable' });
+    }
+
+    let claim: unknown;
+    try {
+      claim = await cache.eval(
+        CLAIM_ISSUER_AUTH_EVENT_LUA,
+        2,
+        nonceKey,
+        authEventKey,
+        '300',
+        processingRecord,
+      );
+    } catch {
+      return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+    }
+
+    if (!Array.isArray(claim) || claim.length !== 2) {
+      return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+    }
+    const claimCode = Number(claim[0]);
+    const claimValue = typeof claim[1] === 'string' ? claim[1] : '';
+    if (claimCode === 0) return reply.code(409).send({ error: 'replay_detected' });
+
+    if (claimCode === 2) {
+      let existing: { status?: unknown; payloadHash?: unknown; result?: unknown };
+      try {
+        const decoded: unknown = JSON.parse(claimValue);
+        if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
+          return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+        }
+        existing = decoded as { status?: unknown; payloadHash?: unknown; result?: unknown };
+      } catch {
+        return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+      }
+      if (existing.payloadHash !== authEventPayloadHash) {
+        return reply.code(409).send({ error: 'issuer_auth_id_conflict' });
+      }
+      if (existing.status === 'completed' && existing.result && typeof existing.result === 'object' && !Array.isArray(existing.result)) {
+        return reply.code(200).send(existing.result);
+      }
+      if (existing.status === 'processing') {
+        return reply.header('retry-after', '5').code(503).send({ error: 'issuer_auth_in_progress' });
+      }
+      return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+    }
+
+    if (claimCode !== 1 || claimValue !== 'OK') {
+      return reply.code(503).send({ error: 'issuer_auth_idempotency_unavailable' });
+    }
+
+    let result: unknown;
+    try {
+      result = await cardOrchestrator.handleAuth(parsed.data);
+    } catch {
+      // The handler may have completed a downstream side effect before failing.
+      // Keep the processing claim and require reconciliation; never auto-replay it.
+      app.log.error({ event: 'issuer_auth_outcome_unknown', authEventFingerprint });
+      return reply.code(503).send({ error: 'issuer_auth_outcome_unknown' });
+    }
+
+    try {
+      const saved = await cache.set(
+        authEventKey,
+        JSON.stringify({ status: 'completed', payloadHash: authEventPayloadHash, result, completedAt: new Date().toISOString() }),
+      );
+      if (saved !== 'OK') throw new Error('issuer_auth_result_not_persisted');
+    } catch {
+      // Leave the original processing claim in place if result persistence fails.
+      app.log.error({ event: 'issuer_auth_result_persistence_failed', authEventFingerprint });
+      return reply.code(503).send({ error: 'issuer_auth_outcome_unknown' });
+    }
+
+    return reply.code(200).send(result);
   });
 
   app.post('/v1/card/:id/freeze', { preHandler: [authGuard] }, async (req: any, reply) => {
     const parsed = cardFreezeSchema.safeParse(req.params);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    await cardOrchestrator.freeze(parsed.data.id);
-    return { ok: true };
+
+    // The gateway has no durable cardId -> owner binding. Do not call the privileged issuer
+    // API with a caller-selected card ID until the provider contract enforces owner scope.
+    return reply
+      .code(503)
+      .header('cache-control', 'no-store')
+      .send({ error: 'card_owner_verification_unavailable' });
   });
 
   app.post('/v1/transactions/lifecycle', { preHandler: [authGuard] }, async (req: any, reply) => {
     const parsed = lifecycleCreateSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    if (!isLifecycleSimulationEnabled()) {
+      return reply
+        .code(503)
+        .header('cache-control', 'no-store')
+        .send({ error: 'transaction_lifecycle_simulation_disabled' });
+    }
 
     const txId = randomUUID();
     const txBase = process.env.TX_ORCHESTRATOR_URL ?? 'http://tx-orchestrator:8091';
@@ -292,13 +478,26 @@ export const buildApp = (deps: Deps = {}) => {
   });
 
   app.get('/v1/transactions/lifecycle/:txId', { preHandler: [authGuard] }, async (req: any, reply) => {
+    if (!isLifecycleSimulationEnabled()) {
+      return reply
+        .code(503)
+        .header('cache-control', 'no-store')
+        .send({ error: 'transaction_lifecycle_simulation_disabled' });
+    }
+
     const tx = await state.readTxLifecycle(req.params.txId);
-    if (!tx) return reply.code(404).send({ error: 'not_found' });
+    if (!tx || tx.userId !== req.user.sub) return reply.code(404).send({ error: 'not_found' });
     return { txId: req.params.txId, state: tx };
   });
 
-
   app.post('/v1/mpc/sign-transaction', { preHandler: [authGuard] }, async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!isSandboxMpcAaEnabled()) {
+      return reply
+        .code(503)
+        .header('cache-control', 'no-store')
+        .send({ error: 'sandbox_mpc_aa_disabled' });
+    }
+
     const parsed = mpcRequestSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     
@@ -313,6 +512,13 @@ export const buildApp = (deps: Deps = {}) => {
   });
 
   app.post('/v1/aa/user-operations', { preHandler: [authGuard] }, async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!isSandboxMpcAaEnabled()) {
+      return reply
+        .code(503)
+        .header('cache-control', 'no-store')
+        .send({ error: 'sandbox_mpc_aa_disabled' });
+    }
+
     try {
       // Simulation: Build and submit UserOp
       const userOpHash = `0xop_${randomUUID().slice(0, 12)}`;
@@ -323,7 +529,14 @@ export const buildApp = (deps: Deps = {}) => {
     }
   });
 
-  app.get('/v1/aa/user-operations/:userOpHash/status', { preHandler: [authGuard] }, async (req: any) => {
+  app.get('/v1/aa/user-operations/:userOpHash/status', { preHandler: [authGuard] }, async (req: any, reply: any) => {
+    if (!isSandboxMpcAaEnabled()) {
+      return reply
+        .code(503)
+        .header('cache-control', 'no-store')
+        .send({ error: 'sandbox_mpc_aa_disabled' });
+    }
+
     return { userOpHash: req.params.userOpHash, status: await userOpService.status(req.params.userOpHash) };
   });
 
