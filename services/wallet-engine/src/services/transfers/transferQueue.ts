@@ -62,16 +62,12 @@ export function markTransferExecuting<T extends WalletTransferRecord>(transfer: 
 }
 
 export function markTransferConfirmed<T extends WalletTransferRecord>(
-  transfer: T,
-  txHash = `simulated-${transfer.id}`
+  _transfer: T,
+  _txHash?: string
 ): T & { txHash: string } {
-  appendTransferQueueEvent(transfer.id, "confirmed", `Transfer confirmed: ${txHash}`);
-  return {
-    ...transfer,
-    status: "confirmed",
-    txHash,
-    updatedAt: new Date().toISOString(),
-  };
+  throw new Error(
+    "Transfer confirmation requires independently verified chain finality; caller-supplied or simulated hashes are not accepted"
+  );
 }
 
 export function markTransferFailed<T extends WalletTransferRecord>(
