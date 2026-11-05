@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { ChainAdapter, ChainBalance, ChainBroadcastResult, ChainFeeEstimate } from "../types.js";
 import type { WalletTransferRecord } from "../../walletEngine.js";
 
@@ -22,14 +21,9 @@ export class SolanaChainAdapter implements ChainAdapter {
     };
   }
 
-  async broadcastTransfer(transfer: WalletTransferRecord): Promise<ChainBroadcastResult> {
-    const txHash = createHash("sha256")
-      .update(`solana:${transfer.id}:${transfer.digest}`)
-      .digest("hex");
-
-    return {
-      txHash,
-      simulated: true
-    };
+  async broadcastTransfer(_transfer: WalletTransferRecord): Promise<ChainBroadcastResult> {
+    throw new Error(
+      "Solana broadcast is disabled until a real signer, broadcaster, and finality verifier are configured"
+    );
   }
 }

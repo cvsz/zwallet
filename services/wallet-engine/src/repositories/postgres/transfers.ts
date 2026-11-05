@@ -98,6 +98,12 @@ export async function updateTransferStatus(
   status: WalletTransferRecord["status"],
   options: { txHash?: string; failureReason?: string } = {}
 ): Promise<WalletTransferRecord> {
+  if (status === "confirmed") {
+    throw new Error(
+      "Transfer confirmation requires independently verified chain finality; generic status updates cannot settle funds"
+    );
+  }
+
   const result = await pool.query(
     `
     UPDATE wallet_transfers

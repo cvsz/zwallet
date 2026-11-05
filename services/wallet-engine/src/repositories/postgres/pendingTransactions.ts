@@ -38,16 +38,9 @@ export async function createPendingTransaction(
 }
 
 export async function markPendingConfirmed(
-  transferId: string
-) {
-  await pool.query(
-    `
-    UPDATE wallet_pending_transactions
-    SET
-      status = 'confirmed',
-      updated_at = NOW()
-    WHERE transfer_id = $1
-    `,
-    [transferId]
+  _transferId: string
+): Promise<never> {
+  throw new Error(
+    "Pending transaction confirmation is disabled until a chain-specific finality verifier supplies canonical receipt evidence"
   );
 }
