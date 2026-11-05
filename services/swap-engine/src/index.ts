@@ -103,7 +103,7 @@ export function scoreRoute(request: SwapQuoteRequest, route: RouteCandidate): Ra
   const gasCostAtomic = route.gasUnits * bufferedGasPriceWei;
 
   const outputScore = Number(expectedOut / 1_000_000n);
-  const gasPenalty = Number(gasCostAtomic / 1_000_000n);
+  const gasPenalty = Number(gasCostAtomic / 1_000_000_000_000_000n);
   const latencyPenalty = route.estimatedLatencyMs * 0.1;
   const slippagePenalty = route.slippageBps * 10;
 
