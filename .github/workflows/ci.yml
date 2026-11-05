@@ -19,6 +19,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile=false
+      - name: Verify wallet transfer execution containment
+        run: node --test scripts/security/transfer-execution-containment.test.mjs
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm check:circular
