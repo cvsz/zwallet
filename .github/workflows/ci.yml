@@ -21,6 +21,8 @@ jobs:
       - run: pnpm install --frozen-lockfile=false
       - name: Verify wallet transfer execution containment
         run: node --test scripts/security/transfer-execution-containment.test.mjs
+      - name: Build RPC workspace types before dependent typechecks
+        run: pnpm --filter @zwallet/rpc build
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm check:circular
