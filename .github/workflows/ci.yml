@@ -23,6 +23,8 @@ jobs:
         run: node --test scripts/security/transfer-execution-containment.test.mjs
       - name: Build RPC workspace types before dependent typechecks
         run: pnpm --filter @zwallet/rpc build
+      - name: Typecheck wallet engine
+        run: pnpm --filter @zwallet/wallet-engine typecheck
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm check:circular
