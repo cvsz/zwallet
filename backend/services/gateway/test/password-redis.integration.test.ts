@@ -1,0 +1,255 @@
+import { randomUUID } from 'node:crypto';
+import Redis from 'ioredis';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildApp } from '../src/app.js';
+import { GatewayStateStore } from '../src/services/state-store.js';
+import { hashPassword } from '../src/services/password.js';
+
+const redisUrl = process.env.REDIS_URL;
+const describeWithRedis = redisUrl ? describe : describe.skip;
+const originalJwtSecret = process.env.JWT_SECRET;
+
+describeWithRedis('gateway password storage with real Redis', () => {
+  let redis: Redis | undefined;
+  let state: GatewayStateStore;
+  const createEmail = `ci-create-${randomUUID()}@example.test`;
+  const existingEmail = `ci-existing-${randomUUID()}@example.test`;
+  const migrationEmail = `ci-migrate-${randomUUID()}@example.test`;
+  const staleEmail = `ci-stale-${randomUUID()}@example.test`;
+
+  beforeAll(async () => {
+    redis = new Redis(redisUrl!, { lazyConnect: true, maxRetriesPerRequest: 1 });
+    await redis.connect();
+    state = new GatewayStateStore(redis as any);
+    process.env.JWT_SECRET = 'test-only-gateway-secret';
+  });
+
+  afterAll(async () => {
+    if (redis) {
+      for (const email of [createEmail, existingEmail, migrationEmail, staleEmail]) {
+        const userId = await redis.hget(`user:${email}`, 'id');
+        await redis.del(`user:${email}`);
+        if (userId) await redis.del(`devices:${userId}`);
+      }
+      await redis.quit();
+    }
+    if (originalJwtSecret === undefined) delete process.env.JWT_SECRET;
+    else process.env.JWT_SECRET = originalJwtSecret;
+  });
+
+  it('creates a new user with a password hash and no plaintext field', async () => {
+    const created = await state.createUser(createEmail, 'scrypt$integration-test-hash', 'device-create');
+    expect(created).not.toBeNull();
+
+    const [storedId, storedEmail, passwordHash, legacyPassword] = await redis!.hmget(
+      `user:${createEmail}`, 'id', 'email', 'password_hash', 'password',
+    );
+
+    expect(storedId).toBe(created!.id);
+    expect(storedEmail).toBe(createEmail);
+    expect(passwordHash).toBe('scrypt$integration-test-hash');
+    expect(legacyPassword).toBeNull();
+    expect(await redis!.hget(`devices:${created!.id}`, 'device-create')).toBe('1');
+  });
+
+  it('does not overwrite an existing account or bind the losing device', async () => {
+    const existingHash = `scrypt${'a'.repeat(32)}${'b'.repeat(128)}`;
+    await redis!.hset(
+      `user:${existingEmail}`,
+      'id', 'existing-user-id',
+      'email', existingEmail,
+      'password_hash', existingHash,
+    );
+    await redis!.hset('devices:existing-user-id', 'existing-device', '1');
+
+    const created = await state.createUser(existingEmail, 'scrypt$replacement-hash', 'device-should-not-bind');
+
+    expect(created).toBeNull();
+    expect(await redis!.hget(`user:${existingEmail}`, 'id')).toBe('existing-user-id');
+    expect(await redis!.hget(`user:${existingEmail}`, 'password_hash')).toBe(existingHash);
+    expect(await redis!.hget('devices:existing-user-id', 'existing-device')).toBe('1');
+    expect(await redis!.hget('devices:existing-user-id', 'device-should-not-bind')).toBeNull();
+  });
+
+  it('allows only one concurrent compare-and-set migration to win', async () => {
+    const legacyPassword = 'legacy-password-for-integration';
+    await redis!.hset(
+      `user:${migrationEmail}`,
+      'id', 'legacy-integration-user',
+      'email', migrationEmail,
+      'password', legacyPassword,
+    );
+
+    const [firstHash, secondHash] = await Promise.all([
+      hashPassword(legacyPassword),
+      hashPassword(legacyPassword),
+    ]);
+    const outcomes = await Promise.all([
+      state.migrateLegacyPassword(migrationEmail, legacyPassword, firstHash),
+      state.migrateLegacyPassword(migrationEmail, legacyPassword, secondHash),
+    ]);
+
+    expect(outcomes.filter(Boolean)).toHaveLength(1);
+    const [storedHash, storedPassword] = await redis!.hmget(
+      `user:${migrationEmail}`, 'password_hash', 'password',
+    );
+    expect([firstHash, secondHash]).toContain(storedHash);
+    expect(storedPassword).toBeNull();
+  });
+
+  it('removes legacy plaintext after a successful login against the stored hash', async () => {
+    const password = 'existing-hash-password';
+    const passwordHash = await hashPassword(password);
+    const userId = randomUUID();
+    const deviceId = `device-${randomUUID()}`;
+    await redis!.hset(
+      `user:${staleEmail}`,
+      'id', userId,
+      'email', staleEmail,
+      'password_hash', passwordHash,
+      'password', password,
+    );
+    await redis!.hset(`devices:${userId}`, deviceId, '1');
+
+    const app = buildApp({ rateLimiter: redis as any, cache: redis as any });
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/login',
+        payload: { email: staleEmail, password, deviceId },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(await redis!.hget(`user:${staleEmail}`, 'password')).toBeNull();
+      expect(await redis!.hget(`user:${staleEmail}`, 'password_hash')).toBe(passwordHash);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects concurrent duplicate registrations without overwriting credentials or binding the losing device', async () => {
+    const email = `ci-duplicate-${randomUUID()}@example.test`;
+    const passwordA = 'first-password-123';
+    const passwordB = 'second-password-456';
+    const deviceA = `device-${randomUUID()}`;
+    const deviceB = `device-${randomUUID()}`;
+    const app = buildApp({ rateLimiter: redis as any, cache: redis as any });
+
+    try {
+      const [responseA, responseB] = await Promise.all([
+        app.inject({
+          method: 'POST',
+          url: '/v1/auth/register',
+          headers: { 'idempotency-key': `registration-${randomUUID()}` },
+          payload: { email, password: passwordA, deviceId: deviceA },
+        }),
+        app.inject({
+          method: 'POST',
+          url: '/v1/auth/register',
+          headers: { 'idempotency-key': `registration-${randomUUID()}` },
+          payload: { email, password: passwordB, deviceId: deviceB },
+        }),
+      ]);
+
+      expect([responseA.statusCode, responseB.statusCode].sort()).toEqual([200, 409]);
+      const user = await state.getUser(email);
+      expect(user?.passwordHash).toMatch(/^scrypt\$/);
+      expect(user?.legacyPassword).toBeNull();
+
+      const [loginA, loginB] = await Promise.all([
+        app.inject({ method: 'POST', url: '/v1/auth/login', payload: { email, password: passwordA, deviceId: deviceA } }),
+        app.inject({ method: 'POST', url: '/v1/auth/login', payload: { email, password: passwordB, deviceId: deviceB } }),
+      ]);
+      expect([loginA.statusCode, loginB.statusCode].sort()).toEqual([200, 401]);
+
+      const winningDevice = loginA.statusCode === 200 ? deviceA : deviceB;
+      const losingDevice = loginA.statusCode === 200 ? deviceB : deviceA;
+      expect(await redis!.hget(`devices:${user!.id}`, winningDevice)).toBe('1');
+      expect(await redis!.hget(`devices:${user!.id}`, losingDevice)).toBeNull();
+    } finally {
+      const userId = await redis!.hget(`user:${email}`, 'id');
+      await app.close();
+      if (userId) await redis!.del(`devices:${userId}`);
+      await redis!.del(`user:${email}`);
+    }
+  });
+
+  it('allows concurrent successful legacy logins to converge on one hash', async () => {
+    const email = `ci-login-${randomUUID()}@example.test`;
+    const userId = randomUUID();
+    const password = 'legacy-concurrent-password';
+    const deviceId = `device-${randomUUID()}`;
+    const app = buildApp({ rateLimiter: redis as any, cache: redis as any });
+
+    try {
+      await redis!.hset(`user:${email}`, 'id', userId, 'email', email, 'password', password);
+      await redis!.hset(`devices:${userId}`, deviceId, '1');
+
+      const login = (nonce: string) => app.inject({
+        method: 'POST',
+        url: '/v1/auth/login',
+        headers: { 'x-nonce': nonce },
+        payload: { email, password, deviceId },
+      });
+      const responses = await Promise.all([login(randomUUID()), login(randomUUID())]);
+
+      expect(responses.map((response) => response.statusCode)).toEqual([200, 200]);
+      expect(await redis!.hget(`user:${email}`, 'password')).toBeNull();
+      expect(await redis!.hget(`user:${email}`, 'password_hash')).toMatch(/^scrypt\$/);
+    } finally {
+      await app.close();
+      await redis!.del(`user:${email}`, `devices:${userId}`);
+    }
+  });
+  it('keeps an in-flight idempotency claim past result TTL and rejects changed payloads', async () => {
+    const key = `ci-idempotency-${randomUUID()}`;
+    const redisKeys = [`idem:${key}:lock`, `idem:${key}:result`, `idem:${key}:fingerprint`];
+    let runCount = 0;
+    let signalStarted!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+
+    try {
+      const first = state.withIdempotency(key, 1, async () => {
+        runCount += 1;
+        signalStarted();
+        await gate;
+        return { operationId: 'stable-operation' };
+      }, 'request-fingerprint-a');
+
+      await started;
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+
+      await expect(
+        state.withIdempotency(key, 1, async () => {
+          runCount += 1;
+          return { operationId: 'duplicate-operation' };
+        }, 'request-fingerprint-a'),
+      ).rejects.toThrow('idempotency_conflict');
+
+      await expect(
+        state.withIdempotency(key, 1, async () => ({ operationId: 'wrong-payload' }), 'request-fingerprint-b'),
+      ).rejects.toThrow('idempotency_payload_conflict');
+
+      release();
+      await expect(first).resolves.toEqual({
+        deduped: false,
+        result: { operationId: 'stable-operation' },
+      });
+      await expect(
+        state.withIdempotency(key, 30, async () => ({ operationId: 'unexpected' }), 'request-fingerprint-a'),
+      ).resolves.toEqual({
+        deduped: true,
+        result: { operationId: 'stable-operation' },
+      });
+      await expect(
+        state.withIdempotency(key, 30, async () => ({ operationId: 'wrong-payload' }), 'request-fingerprint-b'),
+      ).rejects.toThrow('idempotency_payload_conflict');
+      expect(runCount).toBe(1);
+    } finally {
+      release?.();
+      await redis!.del(...redisKeys);
+    }
+  });
+
+});

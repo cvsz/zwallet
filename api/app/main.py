@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from fastapi import FastAPI, Depends, HTTPException
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -19,6 +20,10 @@ from app.application.schemas import (
     QuoteRequestDTO,
     QuoteResponseDTO,
     ExecuteRequestDTO,
+    ZTraderEvidenceSourceDTO,
+    ZTraderOnchainEvidenceDataDTO,
+    ZTraderOnchainEvidenceRequestDTO,
+    ZTraderOnchainEvidenceResponseDTO,
 )
 from app.middleware.security_unified import UnifiedSecurityMiddleware, enforce_runtime_prerequisites
 from app.middleware.idempotency_global import GlobalIdempotencyMiddleware
@@ -150,3 +155,32 @@ async def execute(payload: ExecuteRequestDTO, _: str = Depends(require_user)) ->
         return orchestrator.execute_with_fallback(candidates, min_out=payload.min_out, max_retries=payload.max_retries)
     except SwapExecutionError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post(
+    "/v1/integrations/ztrader/onchain-evidence",
+    response_model=ZTraderOnchainEvidenceResponseDTO,
+)
+@limiter.limit("30/minute")
+async def ztrader_onchain_evidence(
+    payload: ZTraderOnchainEvidenceRequestDTO,
+    _: str = Depends(require_user),
+) -> ZTraderOnchainEvidenceResponseDTO:
+    """Return explicit read-only evidence state without exposing signing authority."""
+    observed_at = datetime.now(UTC).isoformat()
+    return ZTraderOnchainEvidenceResponseDTO(
+        trace_id=payload.trace_id,
+        chain=payload.chain,
+        address=payload.address,
+        observed_at=observed_at,
+        freshness_seconds=0,
+        quality="UNAVAILABLE",
+        sources=[
+            ZTraderEvidenceSourceDTO(
+                provider="zwallet:collector-status",
+                reference=None,
+                observed_at=observed_at,
+            )
+        ],
+        evidence=ZTraderOnchainEvidenceDataDTO(),
+    )

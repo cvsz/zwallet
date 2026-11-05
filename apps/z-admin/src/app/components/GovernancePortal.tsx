@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-// @ts-ignore
+// @ts-expect-error lucide-react types
 import { Vote, FileText, Users, Clock, CheckCircle2, XCircle } from 'lucide-react';
 
 interface Proposal {
@@ -42,7 +42,7 @@ export default function GovernancePortal() {
           <div className="lg:col-span-2 space-y-6">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
               <h2 className="text-lg font-bold uppercase tracking-widest flex items-center gap-2">
-                {/* @ts-ignore */}
+                {/* @ts-expect-error lucide-react types */}
                 <FileText className="w-5 h-5 text-amber-500" />
                 Active Proposals
               </h2>
@@ -90,9 +90,9 @@ export default function GovernancePortal() {
 
                 <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 uppercase">
                   <div className="flex items-center gap-4">
-                    {/* @ts-ignore */}
+                    {/* @ts-expect-error lucide-react types */}
                     <span className="flex items-center gap-1"><Users className="w-3 h-3" /> 242 VOTERS</span>
-                    {/* @ts-ignore */}
+                    {/* @ts-expect-error lucide-react types */}
                     <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> ENDS IN {p.endsIn}</span>
                   </div>
                   <button className="text-amber-500 font-bold hover:underline">Cast Vote →</button>
@@ -132,7 +132,7 @@ export default function GovernancePortal() {
 
             <div className="p-6 border border-slate-800 rounded-lg">
               <div className="flex items-center gap-2 mb-4">
-                {/* @ts-ignore */}
+                {/* @ts-expect-error lucide-react types */}
                 <CheckCircle2 className="w-5 h-5 text-green-500" />
                 <span className="text-xs font-bold uppercase tracking-widest text-slate-300">Quorum Progress</span>
               </div>

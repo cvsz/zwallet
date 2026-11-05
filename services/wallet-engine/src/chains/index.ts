@@ -11,7 +11,11 @@ const adapters: Record<WalletTransferRecord["chain"], ChainAdapter> = {
 };
 
 export function getChainAdapter(chain: WalletTransferRecord["chain"]): ChainAdapter {
-  return adapters[chain];
+  const adapter = adapters[chain];
+  if (!adapter) {
+    throw new Error(`unsupported chain adapter: ${chain}`);
+  }
+  return adapter;
 }
 
 export * from "./types.js";

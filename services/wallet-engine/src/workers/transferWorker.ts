@@ -40,7 +40,6 @@ import {
   broadcastTransfer,
 } from "../adapters/index.js";
 
-const worker =
   new Worker(
     "transfer-execution",
 

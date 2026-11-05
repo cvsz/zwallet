@@ -1,0 +1,53 @@
+name: Backend Workspace CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-workspace-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-workspace-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Verify backend npm workspace boundary and committed lock contract
+        run: node scripts/verify-workspace-lock.mjs
+
+      - name: Install backend workspace from committed lockfile
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify install did not mutate the committed lockfile
+        run: git -C .. diff --exit-code -- backend/package-lock.json
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace @zwallet/gateway
+
+      - name: Build gateway
+        run: npm run build --workspace @zwallet/gateway
+
+      - name: Run gateway regression suite
+        run: npm run test --workspace @zwallet/gateway

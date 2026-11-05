@@ -51,8 +51,11 @@ export const securityPlugin = fp(async function securityPlugin(app: FastifyInsta
   app.decorate('authenticate', async function (req: FastifyRequest, reply: FastifyReply) {
     try {
       await req.jwtVerify();
+      if ((req as any).user?.typ !== 'access') {
+        return reply.code(401).header('cache-control', 'no-store').send({ error: 'Unauthorized' });
+      }
     } catch {
-      return reply.code(401).send({ error: 'Unauthorized' });
+      return reply.code(401).header('cache-control', 'no-store').send({ error: 'Unauthorized' });
     }
   });
 

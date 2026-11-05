@@ -1,39 +1,37 @@
-name: Codex PR Gate
+name: Workflow Boundary Contract
 
 on:
   pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "scripts/security/**"
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/**"
+      - "scripts/security/**"
 
 permissions:
   contents: read
-  pull-requests: write
+
+concurrency:
+  group: workflow-boundary-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  codex-audit:
-    runs-on: ubuntu-latest
-
+  workflow-boundary:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Run Codex Audit
-        id: codex
-        uses: openai/codex-action@main
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
-          prompt: |
-            You are auditing a fintech system.
+          persist-credentials: false
 
-            HARD RULES:
-            - Reject if ledger invariant violated
-            - Reject if no idempotency
-            - Reject if env secrets used
-            - Reject if security pipeline bypassed
+      - name: Verify Node runtime
+        run: node --version
 
-            Output JSON:
-            { "status": "PASS" | "FAIL", "reason": "..." }
-
-      - name: Enforce Result
-        run: |
-          if grep -q '"status": "FAIL"' <<< "${{ steps.codex.outputs.final-message }}"; then
-            echo "❌ Codex audit failed"
-            exit 1
-          fi
+      - name: Run workflow security contract tests
+        run: node --test scripts/security/workflow-boundary.test.mjs
