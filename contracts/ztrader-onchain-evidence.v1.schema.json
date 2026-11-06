@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zeaz.dev/contracts/ztrader-onchain-evidence.v1.schema.json",
+  "title": "ZTrader On-chain Evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "token",
+    "observed_at",
+    "source",
+    "freshness_seconds"
+  ],
+  "properties": {
+    "version": {
+      "const": "1.0"
+    },
+    "trace_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "token": {
+      "type": "object",
+      "required": [
+        "chain",
+        "address"
+      ],
+      "properties": {
+        "chain": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "symbol": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "freshness_seconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "quality_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "holders": {
+      "type": "object",
+      "properties": {
+        "top10_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "insider_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "holder_growth_pct": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "flows": {
+      "type": "object",
+      "properties": {
+        "net_flow_usd": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "exchange_inflow_usd": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "exchange_outflow_usd": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "smart_money_net_usd": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "suspicious_flow_score": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "liquidity": {
+      "type": "object",
+      "properties": {
+        "liquidity_usd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "lp_lock_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "price_impact_1k_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "price_impact_10k_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "deployer": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "previous_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "suspicious": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}
