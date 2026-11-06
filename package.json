@@ -6,6 +6,7 @@
     "typecheck": "pnpm --filter @zwallet/rpc build && pnpm -r --if-present run typecheck",
     "lint": "pnpm -r --if-present run lint",
     "check:circular": "madge --circular --extensions ts apps/api/src services/wallet-engine/src services/swap-engine/src services/indexer/src packages/crypto-core/src packages/chain-adapters/src packages/shared-types/src",
+    "test:event-workers": "pnpm --filter @zwallet/event-workers test",
     "setup:auto": "node scripts/run-installer.mjs",
     "generate:releases": "node scripts/generate-releases.mjs"
   },
