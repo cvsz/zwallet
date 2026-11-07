@@ -29,7 +29,7 @@ jobs:
           enable-cache: false
 
       - name: Compile hash-locked Python dependency candidate
-        run: uv pip compile api/requirements.in --output-file /tmp/zwallet-api-requirements.txt --generate-hashes --python-version 3.12
+        run: uv pip compile api/requirements.in --constraint api/requirements.txt --output-file /tmp/zwallet-api-requirements.txt --generate-hashes --python-version 3.12 --upgrade-package pyjwt --upgrade-package anyio --upgrade-package certifi --upgrade-package cryptography --upgrade-package pyasn1 --upgrade-package starlette
 
       - name: Upload dependency lock candidate for review
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
