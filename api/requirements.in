@@ -13,8 +13,8 @@ SQLAlchemy
 alembic
 
 # Security
-PyJWT[crypto]>=2.8.0
-cryptography>=42.0.0
+PyJWT[crypto]>=2.14.0
+cryptography>=50.0.0
 
 # HTTP
 httpx
@@ -26,6 +26,8 @@ prometheus-client
 # Utils
 python-dotenv
 
-# CVE patches (transitive overrides)
-starlette>=0.40.0
-pyasn1>=0.6.0
+# Security floors for currently disclosed transitive advisories
+anyio>=4.14.2
+certifi>=2026.10.18
+starlette>=1.3.1
+pyasn1>=0.6.5
