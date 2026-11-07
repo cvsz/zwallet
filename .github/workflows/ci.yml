@@ -31,6 +31,12 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Verify TypeScript workspace build-order contract
+        run: python scripts/ci/test_tsconfig_aliases.py
       - run: pnpm typecheck
+      - name: Verify shared-types declaration outputs
+        run: |
+          test -s packages/shared-types/dist/wallet.d.ts
+          test -s packages/shared-types/dist/contracts.d.ts
       - run: pnpm lint
       - run: pnpm check:circular
