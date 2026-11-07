@@ -52,7 +52,8 @@ test("wallet transfer worker cannot create a production queue consumer or sign/b
   }
 
   const runner = readRepositoryFile("services/wallet-engine/src/runTransferWorker.ts");
-  assert.match(runner, /disabled/);
+  assert.match(runner, /transferExecutionStatus\.state/);
+  assert.match(runner, /transferExecutionStatus\.reason/);
   assert.doesNotMatch(runner, /setInterval/);
   assert.doesNotMatch(runner, /transfer worker online/i);
 });
