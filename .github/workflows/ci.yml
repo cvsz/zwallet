@@ -9,7 +9,19 @@ permissions:
   contents: read
 
 jobs:
+  financial-execution-hold:
+    name: financial-execution-hold
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify financial execution remains disabled
+        run: node --test services/event-workers/test/financial-hold.test.js
+
   validate:
+    needs: financial-execution-hold
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
