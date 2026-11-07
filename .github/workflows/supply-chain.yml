@@ -39,6 +39,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Require committed hash lock to match the compiler output
+        run: diff -u api/requirements.txt /tmp/zwallet-api-requirements.txt
+
       - name: Build local image for scanning (no registry credentials)
         shell: bash
         run: |
