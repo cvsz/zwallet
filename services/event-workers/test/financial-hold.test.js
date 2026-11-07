@@ -13,8 +13,13 @@ function readRepositoryFile(relativePath) {
   return readFileSync(path.join(repositoryRoot, relativePath), "utf8");
 }
 
+function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+}
+
 test("event worker is held before connecting, subscribing, publishing, or acknowledging", () => {
   const source = readRepositoryFile("services/event-workers/src/index.ts");
+  const executableSource = stripComments(source);
 
   assert.match(source, /EXECUTION_DISABLED/);
   for (const forbidden of [
@@ -26,7 +31,7 @@ test("event worker is held before connecting, subscribing, publishing, or acknow
     /\.subscribe\s*\(/,
     /\.publish\s*\(/,
   ]) {
-    assert.doesNotMatch(source, forbidden);
+    assert.doesNotMatch(executableSource, forbidden);
   }
 });
 
