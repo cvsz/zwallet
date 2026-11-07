@@ -10,7 +10,7 @@ dependencies = [
   "sqlalchemy[asyncio]==2.0.40",
   "asyncpg==0.30.0",
   "alembic==1.15.2",
-  "pyjwt==2.14.0",
+  "pyjwt>=2.14.0",
   "anyio>=4.14.2",
   "certifi>=2026.10.18",
   "cryptography>=50.0.0",
