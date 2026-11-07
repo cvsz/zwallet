@@ -114,13 +114,17 @@ test("production publication and deployment remain disabled until a separately r
 test("workspace typecheck builds exported RPC declarations before consumers", () => {
   const rootPackage = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
   const rpcPackage = JSON.parse(readFileSync(join(ROOT, "packages", "rpc", "package.json"), "utf8"));
+  const walletEngine = JSON.parse(readFileSync(join(ROOT, "services", "wallet-engine", "package.json"), "utf8"));
+  const adminWallet = JSON.parse(readFileSync(join(ROOT, "apps", "admin-wallet", "package.json"), "utf8"));
 
   assert.equal(
     rootPackage.scripts.typecheck,
-    "pnpm --filter @zwallet/rpc build && pnpm -r --if-present run typecheck",
+    "pnpm --filter @zwallet/shared-types build && pnpm --filter @zwallet/rpc build && pnpm --filter @zwallet/wallet-engine build && pnpm -r --if-present run typecheck",
   );
   assert.equal(rpcPackage.exports["."].types, "./dist/index.d.ts");
   assert.equal(rpcPackage.exports["."].default, "./dist/index.js");
+  assert.equal(walletEngine.exports["./walletEngine"].types, "./dist/walletEngine.d.ts");
+  assert.equal(adminWallet.dependencies["@zwallet/wallet-engine"], "workspace:*");
 });
 
 test("RPC package explicitly emits declarations at its published types path", () => {
