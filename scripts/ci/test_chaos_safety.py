@@ -4,7 +4,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = (ROOT / ".github/workflows/chaos.yml").read_text(encoding="utf-8")
 SCRIPT = (ROOT / "tests/chaos/kill-pod.sh").read_text(encoding="utf-8")
-DEPLOY_WORKFLOW = (ROOT / ".github/workflows/cicd.yml").read_text(encoding="utf-8")
 
 
 class ChaosSafetyContractTests(unittest.TestCase):
@@ -31,16 +30,13 @@ class ChaosSafetyContractTests(unittest.TestCase):
         self.assertNotIn("-n zwallet ", SCRIPT)
         self.assertNotIn("kubectl get pods -n zwallet", SCRIPT)
 
-    def test_production_deployment_is_manual_and_confirmation_gated(self):
-        self.assertIn("workflow_dispatch:", DEPLOY_WORKFLOW)
-        self.assertIn("Type DEPLOY to authorize a production deployment", DEPLOY_WORKFLOW)
-        deploy_job = DEPLOY_WORKFLOW.split("  deploy-blue-green:", 1)[1]
-        self.assertIn("if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'", deploy_job)
-        self.assertIn("environment: production", deploy_job)
-        self.assertIn('DEPLOY_CONFIRMATION" == "DEPLOY"', deploy_job)
-        self.assertIn("K8S_NAMESPACE must be configured", deploy_job)
-        self.assertNotIn("kubectl apply -f infra/chaos/chaos-pipeline.yaml", deploy_job)
-        self.assertNotIn("if: github.ref == 'refs/heads/main'", deploy_job)
+    def test_production_deployment_workflows_remain_absent_until_operator_admission(self):
+        workflows = ROOT / ".github/workflows"
+        for name in ("cicd.yml", "deploy.yml", "deploy-k8s.yml"):
+            self.assertFalse(
+                (workflows / name).exists(),
+                f"{name} must not be restored before a separately approved deployment admission",
+            )
 
 
 if __name__ == "__main__":
