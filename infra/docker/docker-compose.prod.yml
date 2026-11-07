@@ -113,18 +113,8 @@ services:
     ports:
       - "8099:8099"
 
-  event-workers:
-    <<: *service-defaults
-    build:
-      context: ../../
-      dockerfile: infra/docker/node-service.Dockerfile
-      args:
-        SERVICE_PATH: services/event-workers
-        SERVICE_NAME: event-workers
-    image: zwallet/event-workers:latest
-    environment:
-      NODE_ENV: production
-      PORT: 8100
+  # event-workers is intentionally omitted until verified financial execution,
+  # settlement idempotency, and chain-finality reconciliation are admitted.
 
   prometheus:
     <<: *service-defaults
