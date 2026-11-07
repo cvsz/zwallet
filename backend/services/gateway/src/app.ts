@@ -53,6 +53,14 @@ const isSandboxMpcAaEnabled = () =>
   ['development', 'test'].includes(process.env.NODE_ENV ?? '') &&
   process.env.WALLET_ENABLE_SANDBOX_MPC_AA === 'true';
 
+const isLifecycleSimulationEnabled = () =>
+  ['development', 'test'].includes(process.env.NODE_ENV ?? '') &&
+  process.env.WALLET_ENABLE_TRANSACTION_LIFECYCLE_SIMULATION === 'true';
+
+const isSandboxMpcAaEnabled = () =>
+  ['development', 'test'].includes(process.env.NODE_ENV ?? '') &&
+  process.env.WALLET_ENABLE_SANDBOX_MPC_AA === 'true';
+
 export const buildApp = (deps: Deps = {}) => {
   const app = Fastify({ logger: false });
   const redis = deps.rateLimiter && deps.cache ? null : new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', { lazyConnect: true });
