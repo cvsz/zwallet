@@ -1,5 +1,5 @@
-import "./workers/transferWorker.js";
+import { transferExecutionStatus } from "./workers/transferWorker.js";
 
-console.log("[wallet-engine] transfer worker online");
-
-setInterval(() => {}, 1 << 30);
+console.error(
+  `[wallet-engine] transfer worker ${transferExecutionStatus.state}: ${transferExecutionStatus.reason}; no Redis connection or queue consumer was started.`
+);

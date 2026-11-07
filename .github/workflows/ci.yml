@@ -9,7 +9,19 @@ permissions:
   contents: read
 
 jobs:
+  financial-execution-hold:
+    name: financial-execution-hold
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify financial execution remains disabled
+        run: node --test services/event-workers/test/financial-hold.test.js
+
   validate:
+    needs: financial-execution-hold
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,6 +31,12 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Verify TypeScript workspace build-order contract
+        run: python scripts/ci/test_tsconfig_aliases.py
       - run: pnpm typecheck
+      - name: Verify shared-types declaration outputs
+        run: |
+          test -s packages/shared-types/dist/wallet.d.ts
+          test -s packages/shared-types/dist/contracts.d.ts
       - run: pnpm lint
       - run: pnpm check:circular

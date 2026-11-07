@@ -12,4 +12,3 @@ scrape_configs:
           - indexer:8093
           - liquidity:8098
           - router:8099
-          - event-workers:8100
