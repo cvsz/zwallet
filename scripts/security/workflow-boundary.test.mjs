@@ -53,6 +53,9 @@ test("supply-chain validation is local-only and read-only", () => {
   assert.match(workflow, /docker build --pull --tag/);
   assert.match(workflow, /image-ref:\s*\$\{\{\s*env\.IMAGE_REF\s*\}\}/);
   assert.match(workflow, /output-file:\s*sbom\.json/);
+  assert.match(workflow, /astral-sh\/setup-uv@[0-9a-f]{40}/);
+  assert.match(workflow, /uv pip compile api\/requirements\.in/);
+  assert.match(workflow, /diff -u api\/requirements\.txt/);
 });
 
 test("PR workflow gate does not expose secrets or invoke a hosted Codex action", () => {
