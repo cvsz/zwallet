@@ -15,9 +15,9 @@ class SupplyChainLockCompilerTests(unittest.TestCase):
         self.assertIn("api/requirements.in > /tmp/zwallet-security-overrides.in", WORKFLOW)
         self.assertIn("--constraint api/requirements.txt", WORKFLOW)
         self.assertIn("--overrides /tmp/zwallet-security-overrides.in", WORKFLOW)
+        self.assertIn('grep -Eiq "^${package}"', WORKFLOW)
         for package in ("PyJWT", "anyio", "certifi", "cryptography", "pyasn1", "starlette"):
-            self.assertRegex(REQUIREMENTS, rf"(?im)^{package}(?:\\[[^]]+\\])?\\s*(?:>=|==|~=)")
-            self.assertRegex(WORKFLOW, rf"(?m)grep -Eiq \"\\^\\$package\"")
+            self.assertRegex(REQUIREMENTS, rf"(?im)^{re.escape(package)}(?:\[[^]]+\])?\s*(?:>=|==|~=)")
 
     def test_hashes_remain_required_and_committed_lock_is_compared(self):
         self.assertIn("--generate-hashes", WORKFLOW)
