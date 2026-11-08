@@ -1,5 +1,12 @@
 # AGENTS.md — zWallet Autonomous Engineering Protocol (v2 - Production)
 
+## READ FIRST — Canonical ZeaZDev Policy
+
+Before changing this repository, read the canonical ecosystem policy:
+https://github.com/cvsz/zeaz/blob/main/zeaz.md
+
+This policy is mandatory. This repository's wallet, ledger, key-management, and transaction invariants below remain in force and may be stricter. Do not weaken them to bypass security, privacy, review, validation, or release controls.
+
 ## 0) Mission
 Deliver production-grade, secure, scalable crypto + payment infrastructure.
 
