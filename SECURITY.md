@@ -12,7 +12,7 @@ Do not publish vulnerability details, exploit code, credentials, personal data, 
 
 A dedicated private reporting channel and GitHub private vulnerability reporting availability have not been verified for this repository. Do not assume that the GitHub private advisory form is enabled.
 
-Until a private intake channel is confirmed, contact the repository owner using the contact method publicly listed on the [cvsz GitHub profile](https://github.com/cvsz) and request a private reporting channel. Send only the request for a secure channel; do not include vulnerability details until that channel is confirmed.
+Until a private intake channel is confirmed, use the repository owner's public GitHub profile only to request a private reporting channel. Do not include vulnerability details in that request; the profile itself is not a verified vulnerability intake channel.
 
 ## Response Expectations
 
