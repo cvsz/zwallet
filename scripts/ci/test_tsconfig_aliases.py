@@ -12,10 +12,13 @@ class TypeScriptWorkspaceResolutionTests(unittest.TestCase):
         script = package["scripts"]["typecheck"]
         self.assertEqual(
             script,
-            "pnpm --filter @zwallet/shared-types build && pnpm --filter @zwallet/rpc build && pnpm -r --if-present run typecheck",
+            "pnpm --filter @zwallet/shared-types build && pnpm --filter @zwallet/rpc build && pnpm --filter @zwallet/wallet-engine build && pnpm -r --if-present run typecheck",
         )
         self.assertEqual(shared_types["exports"]["./wallet"]["types"], "./dist/wallet.d.ts")
         self.assertEqual(shared_types["exports"]["./contracts"]["types"], "./dist/contracts.d.ts")
+
+        wallet_engine = json.loads((ROOT / "services/wallet-engine/package.json").read_text(encoding="utf-8"))
+        self.assertEqual(wallet_engine["exports"]["./walletEngine"]["types"], "./dist/walletEngine.d.ts")
 
     def test_runtime_package_exports_remain_dist_based(self):
         package = json.loads((ROOT / "packages/rpc/package.json").read_text(encoding="utf-8"))
