@@ -277,41 +277,12 @@ const executionPipeline = new SwapExecutionPipeline();
 
 app.get('/health', async () => ({ service: 'swap-service', status: 'ok', timestamp: new Date().toISOString() }));
 
-app.post('/v1/swaps/quote', async (request, reply) => {
-  const parsed = quoteSchema.safeParse(request.body);
-  if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+app.post('/v1/swaps/quote', async (_request, reply) =>
+  reply.code(503).header('cache-control', 'no-store').send({ error: 'swap_quotes_unavailable' })
+);
 
-  const result = await routingEngine.buildRoutes(parsed.data);
-  if (result.rankedRoutes.length === 0) {
-    return reply.code(422).send({ error: 'no viable routes after simulation' });
-  }
-
-  return {
-    quoteId: result.quoteId,
-    bestRoute: result.rankedRoutes[0],
-    alternatives: result.rankedRoutes.slice(1),
-    rankingPolicy: ['best-output', 'lowest-gas', 'lowest-slippage-risk', 'multi-hop-penalty']
-  };
-});
-
-app.post('/v1/swaps/execute', async (request, reply) => {
-  const parsed = executeSchema.safeParse(request.body);
-  if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-
-  const routes = routingEngine.getQuoteRoutes(parsed.data.quoteId);
-  if (routes.length === 0) return reply.code(404).send({ error: 'quote not found or expired' });
-
-  const execution = await executionPipeline.executeWithFallback(routes, parsed.data.walletAddress, parsed.data.failSources ?? [], !parsed.data.forcePublicRpc);
-  if (execution.status === 'failed') {
-    return reply.code(502).send({ status: execution.status, attempts: execution.attempts, error: 'all routes failed, fallback exhausted' });
-  }
-
-  return {
-    status: execution.status,
-    attemptCount: execution.attempts.length,
-    selected: execution.winner,
-    attempts: execution.attempts
-  };
-});
+app.post('/v1/swaps/execute', async (_request, reply) =>
+  reply.code(503).header('cache-control', 'no-store').send({ error: 'swap_execution_disabled' })
+);
 
 await app.listen({ port: Number(process.env.PORT ?? 0), host: '0.0.0.0' });

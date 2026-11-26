@@ -111,16 +111,21 @@ test("production publication and deployment remain disabled until a separately r
   assert.match(readWorkflow("supply-chain.yml"), /docker build --pull --tag/);
 });
 
-test("workspace typecheck builds exported RPC declarations before consumers", () => {
+test("workspace typecheck builds declaration dependencies before consumers", () => {
   const rootPackage = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+  const sharedTypesPackage = JSON.parse(readFileSync(join(ROOT, "packages", "shared-types", "package.json"), "utf8"));
   const rpcPackage = JSON.parse(readFileSync(join(ROOT, "packages", "rpc", "package.json"), "utf8"));
+  const walletEnginePackage = JSON.parse(readFileSync(join(ROOT, "services", "wallet-engine", "package.json"), "utf8"));
 
   assert.equal(
     rootPackage.scripts.typecheck,
-    "pnpm --filter @zwallet/rpc build && pnpm -r --if-present run typecheck",
+    "pnpm --filter @zwallet/shared-types build && pnpm --filter @zwallet/rpc build && pnpm --filter @zwallet/wallet-engine build && pnpm -r --if-present run typecheck",
   );
+  assert.equal(sharedTypesPackage.exports["./wallet"].types, "./dist/wallet.d.ts");
+  assert.equal(sharedTypesPackage.exports["./contracts"].types, "./dist/contracts.d.ts");
   assert.equal(rpcPackage.exports["."].types, "./dist/index.d.ts");
   assert.equal(rpcPackage.exports["."].default, "./dist/index.js");
+  assert.equal(walletEnginePackage.exports["./walletEngine"].types, "./dist/walletEngine.d.ts");
 });
 
 test("RPC package explicitly emits declarations at its published types path", () => {
