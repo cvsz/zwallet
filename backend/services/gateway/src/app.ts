@@ -540,40 +540,9 @@ export const buildApp = (deps: Deps = {}) => {
     return { userOpHash: req.params.userOpHash, status: await userOpService.status(req.params.userOpHash) };
   });
 
-  app.post('/v1/flow/wallet-sign-swap', { preHandler: [authGuard] }, async (req: any, reply) => {
-    const parsed = swapRequestSchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-
-    const walletBase = process.env.WALLET_SERVICE_URL ?? 'http://wallet-service:8090';
-    const policyBase = process.env.POLICY_SERVICE_URL ?? 'http://policy-service:8094';
-    const swapBase = process.env.SWAP_SERVICE_URL ?? 'http://swap-service:8092';
-    const indexerBase = process.env.INDEXER_SERVICE_URL ?? 'http://indexer-service:8093';
-    const portfolioBase = process.env.PORTFOLIO_SERVICE_URL ?? 'http://portfolio-service:8095';
-
-    const walletRes = await fetch(`${walletBase}/v1/wallets/default`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId: req.user.sub, chain: parsed.data.chain }) });
-    const wallet = await walletRes.json();
-
-    const policyRes = await fetch(`${policyBase}/v1/policy/pre-sign`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId: req.user.sub, chain: parsed.data.chain, amount: parsed.data.amount, fromToken: parsed.data.fromToken, toToken: parsed.data.toToken }) });
-    const policy = await policyRes.json();
-    if (!policyRes.ok) return reply.code(403).send({ stage: 'sign', policy });
-
-    const quoteRes = await fetch(`${swapBase}/v1/swaps/quote`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chain: parsed.data.chain, tokenIn: parsed.data.fromToken, tokenOut: parsed.data.toToken, amountIn: parsed.data.amount, slippageBps: parsed.data.slippageBps }) });
-    const quoteBody = await quoteRes.json();
-    if (!quoteRes.ok) return reply.code(400).send({ stage: 'swap', error: quoteBody });
-
-    const routeId = quoteBody.quote?.routeId;
-    const executeRes = await fetch(`${swapBase}/v1/swaps/execute`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ routeId, walletAddress: wallet.address }) });
-    const executeBody = await executeRes.json();
-    if (!executeRes.ok) return reply.code(400).send({ stage: 'broadcast', error: executeBody });
-
-    const txHash = executeBody.tx?.hash;
-    await fetch(`${indexerBase}/indexer/batch`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jobs: [{ idempotencyKey: `${txHash}:${req.user.sub}`, chain: parsed.data.chain === 'solana' ? 'solana' : parsed.data.chain === 'bitcoin' ? 'bitcoin' : 'evm', addresses: [wallet.address], cursor: txHash }] }) });
-
-    const portfolioRes = await fetch(`${portfolioBase}/v1/portfolio/display`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId: req.user.sub, chain: parsed.data.chain, walletAddress: wallet.address, txHash }) });
-    const portfolio = await portfolioRes.json();
-
-    return { flow: ['wallet', 'sign', 'swap', 'broadcast', 'index', 'display'], wallet, policy, quote: quoteBody.quote, execution: executeBody, portfolio };
-  });
+  app.post('/v1/flow/wallet-sign-swap', { preHandler: [authGuard] }, async (_req: FastifyRequest, reply: FastifyReply) =>
+    reply.code(503).header('cache-control', 'no-store').send({ error: 'swap_execution_disabled' })
+  );
 
   return app;
 };

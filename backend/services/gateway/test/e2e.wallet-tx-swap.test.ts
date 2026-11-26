@@ -188,8 +188,12 @@ describe('e2e: create wallet, send transaction, swap token', () => {
     expect(wallet.statusCode, wallet.body).toBe(200);
     const tx = await app.inject({ method: 'POST', url: '/v1/transactions/lifecycle', headers: { authorization: `Bearer ${token}`, 'x-nonce': 'n2' }, payload: { chain: 'evm', from: '0xsender', to: '0xreceiver', value: '10', signatureHex: 'abcdef123456' } });
     expect(tx.statusCode).toBe(200);
+    vi.mocked(global.fetch).mockClear();
     const swap = await app.inject({ method: 'POST', url: '/v1/flow/wallet-sign-swap', headers: { authorization: `Bearer ${token}`, 'x-nonce': 'n3' }, payload: { chain: 'ethereum', fromToken: 'USDC', toToken: 'ETH', amount: '100', slippageBps: 50 } });
-    expect(swap.statusCode).toBe(200);
+    expect(swap.statusCode).toBe(503);
+    expect(swap.headers['cache-control']).toBe('no-store');
+    expect(swap.json()).toEqual({ error: 'swap_execution_disabled' });
+    expect(global.fetch).not.toHaveBeenCalled();
 
     // Phase 6: Test new Intelligent Orchestration endpoint
     const orchestrate = await app.inject({ 
