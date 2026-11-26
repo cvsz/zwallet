@@ -6,13 +6,16 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class TypeScriptWorkspaceResolutionTests(unittest.TestCase):
-    def test_rpc_build_precedes_recursive_typecheck(self):
+    def test_shared_types_and_rpc_build_precede_recursive_typecheck(self):
         package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+        shared_types = json.loads((ROOT / "packages/shared-types/package.json").read_text(encoding="utf-8"))
         script = package["scripts"]["typecheck"]
         self.assertEqual(
             script,
-            "pnpm --filter @zwallet/rpc build && pnpm -r --if-present run typecheck",
+            "pnpm --filter @zwallet/shared-types build && pnpm --filter @zwallet/rpc build && pnpm -r --if-present run typecheck",
         )
+        self.assertEqual(shared_types["exports"]["./wallet"]["types"], "./dist/wallet.d.ts")
+        self.assertEqual(shared_types["exports"]["./contracts"]["types"], "./dist/contracts.d.ts")
 
     def test_runtime_package_exports_remain_dist_based(self):
         package = json.loads((ROOT / "packages/rpc/package.json").read_text(encoding="utf-8"))
